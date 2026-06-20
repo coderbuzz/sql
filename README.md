@@ -1,9 +1,15 @@
-<!-- docs: sync from coderbuzz/codex@cd4a13b -->
+<!-- docs: sync from coderbuzz/codex@46af4b9 -->
 
 # @coderbuzz/sql
 
 > **The un-opinionated SQL toolkit for TypeScript.** Schema-driven. Multi-dialect. Runtime agnostic. No ORM lock-in.
 > AI agents: see [AI_KNOWLEDGE.md](https://github.com/coderbuzz/sql/blob/main/AI_KNOWLEDGE.md) for expert context.
+<p align="center">
+  <a href="https://www.npmjs.com/package/@coderbuzz/sql"><img src="https://img.shields.io/npm/v/@coderbuzz/sql.svg?style=flat-square" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@coderbuzz/sql"><img src="https://img.shields.io/npm/dm/@coderbuzz/sql.svg?style=flat-square" alt="npm downloads" /></a>
+  <a href="https://github.com/coderbuzz/sql/blob/main/LICENSE"><img src="https://img.shields.io/github/license/coderbuzz/sql.svg?style=flat-square" alt="MIT License" /></a>
+  <a href="https://github.com/coderbuzz/sql"><img src="https://img.shields.io/github/stars/coderbuzz/sql.svg?style=flat-square" alt="GitHub Stars" /></a>
+</p>
 
 `@coderbuzz/sql` is a type-safe SQL toolkit that gives you the **full power of SQL** without the abstraction leaks of ORMs or the verbosity of raw query builders. Write schema definitions once, then use them for DDL, typed queries, migrations, batch inserts, and streaming — across **8 database dialects**.
 
