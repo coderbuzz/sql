@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@6f70be3 -->
+<!-- docs: sync from coderbuzz/codex@37792f4 -->
 
 # @coderbuzz/sql — AI Expert Knowledge Reference
 
@@ -1087,7 +1087,7 @@ Version: 0.1.3
 License: MIT
 Type:    ESM only (type: "module")
 Peer deps (all optional): pg, mysql2, mssql, better-sqlite3, @db/sqlite, oracledb, snowflake-sdk, @databricks/sql
-Runtime dep: @coderbuzz/kyo (internal — schema coercion)
+Runtime dep: @coderbuzz/veta (internal — schema coercion)
 ```
 
 **Export map summary:**
