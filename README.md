@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@46af4b9 -->
+<!-- docs: sync from coderbuzz/codex@7af404c -->
 
 # @coderbuzz/sql
 
@@ -137,6 +137,25 @@ const rows = await users.from(db)
 
 db.close();
 ```
+
+---
+
+## Benchmarks
+
+Full results at **[github.com/coderbuzz/benchmarks](https://github.com/coderbuzz/benchmarks)**.
+
+SQL query compilation throughput on Apple M-series, Bun runtime. Higher is better.
+
+| Scenario | @coderbuzz/sql | Kysely | Factor vs Kysely | Drizzle ORM | Factor vs Drizzle |
+|---|---|---|---|---|---|
+| SELECT simple | **1,700,391 ops/s** | 561,869 | **3.0x** | 34,239 | **49.7x** |
+| SELECT JOIN (2 tables) | **2,208,322 ops/s** | 310,690 | **7.1x** | 16,801 | **131.4x** |
+| INSERT single row | **2,954,261 ops/s** | 393,159 | **7.5x** | 55,085 | **53.6x** |
+| INSERT batch 100 rows | **134,187 ops/s** | 17,634 | **7.6x** | 914 | **146.8x** |
+| CTE (WITH clause) | **831,703 ops/s** | 224,893 | **3.7x** | 12,222 | **68.0x** |
+| 10 nested WHERE conditions | **656,309 ops/s** | 117,064 | **5.6x** | 12,692 | **51.7x** |
+
+`@coderbuzz/sql` is 3-7x faster than Kysely and 50-147x faster than Drizzle ORM across every query type. The gap widens with query complexity (batch, JOIN, conditions) due to `@coderbuzz/sql`'s zero-overhead string compilation strategy vs Kysely's AST-based approach and Drizzle's ORM abstraction layer.
 
 ---
 
