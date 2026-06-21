@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@e5210d1 -->
+<!-- docs: sync from coderbuzz/codex@e9b6bce -->
 
 # @coderbuzz/sql
 
@@ -9,8 +9,8 @@
   <a href="https://www.npmjs.com/package/@coderbuzz/sql"><img src="https://img.shields.io/npm/dm/@coderbuzz/sql.svg?style=flat-square" alt="npm downloads" /></a>
   <a href="https://github.com/coderbuzz/sql/blob/main/LICENSE"><img src="https://img.shields.io/github/license/coderbuzz/sql.svg?style=flat-square" alt="MIT License" /></a>
   <a href="https://github.com/coderbuzz/sql"><img src="https://img.shields.io/github/stars/coderbuzz/sql.svg?style=flat-square" alt="GitHub Stars" /></a>
-  <a href="https://github.com/coderbuzz/codex/actions/workflows/ci.sql.yml"><img src="https://github.com/coderbuzz/codex/actions/workflows/ci.sql.yml/badge.svg" alt="CI" /></a>
-  <a href="https://codecov.io/gh/coderbuzz/codex"><img src="https://codecov.io/gh/coderbuzz/codex/graph/badge.svg?flag=sql" alt="Codecov" /></a>
+  <a href="https://github.com/coderbuzz/sql/actions/workflows/ci.yml"><img src="https://github.com/coderbuzz/sql/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://codecov.io/gh/coderbuzz/sql"><img src="https://codecov.io/gh/coderbuzz/sql/graph/badge.svg" alt="Codecov" /></a>
 </p>
 
 `@coderbuzz/sql` is a type-safe SQL toolkit that gives you the **full power of SQL** without the abstraction leaks of ORMs or the verbosity of raw query builders. Write schema definitions once, then use them for DDL, typed queries, migrations, batch inserts, and streaming — across **8 database dialects**.
