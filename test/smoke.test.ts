@@ -9,6 +9,6 @@ test("Sql builder produces SQL", () => {
 });
 
 test("aggregate functions", () => {
-  expect(count().toSQL()).toContain("COUNT");
-  expect(sum("score").toSQL()).toContain("SUM");
+  expect(count().sql).toContain("COUNT");
+  expect(sum("score").sql).toContain("SUM");
 });
