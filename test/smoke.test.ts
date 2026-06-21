@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { Sql, count, sum } from "@coderbuzz/sql";
+import { Sql, count, sum } from "../src/index";
 
 test("Sql builder produces SQL", () => {
   const db = new Sql();
