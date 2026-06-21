@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@b36584c -->
+<!-- docs: sync from coderbuzz/codex@e5210d1 -->
 
 # @coderbuzz/sql — AI Expert Knowledge Reference
 
