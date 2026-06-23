@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@e9b6bce -->
+<!-- docs: sync from coderbuzz/codex@b1e2bde -->
 
 # @coderbuzz/sql
 
@@ -617,9 +617,33 @@ const db = mssql.connect({ server: "localhost", port: 1433, database: "app", use
 const db = ch.connect({ url: "http://localhost:8123", database: "default", username: "default", password: "" });
 ```
 
-### Oracle, Snowflake, Databricks
+### Oracle
 
-See the full API reference for connection config details.
+```ts
+const db = oracle.connect({
+  user: "app", password: "secret",
+  connectString: "localhost/XEPDB1", poolMax: 10,
+});
+```
+
+### Snowflake
+
+```ts
+const db = snowflake.connect({
+  account: "my-account", username: "APP_USER", password: "secret",
+  database: "APP_DB", schema: "PUBLIC", warehouse: "COMPUTE_WH", role: "APP_ROLE",
+});
+```
+
+### Databricks
+
+```ts
+const db = databricks.connect({
+  host: "adb-xxxx.azuredatabricks.net",
+  path: "/sql/1.0/warehouses/xxxx",
+  token: "dapi...",
+});
+```
 
 ---
 
@@ -643,28 +667,36 @@ See the full API reference for connection config details.
 ### `Sql<T>` (Base Engine)
 
 ```ts
-db.use(middleware): this
-await db.execute(queryOrSql): Promise<T>
-await db.transaction(fn): Promise<R>
-await db.migrate(...tables): Promise<void>
-db.select(...fields): SelectQuery<T>
-db.select_distinct(...fields): SelectQuery<T>
-db.insert_into(table, options?): InsertQuery<T>
-db.batchInsert(table, options): InsertBatcher<T>
-db.update(table): UpdateQuery<T>
-db.delete_from(table): DeleteQuery<T>
-db.sql<R>(strings, ...values): RawQuery<R>
-db.dialect: string
-db.compiler: BaseCompiler
+db.use(middleware)              // register middleware in the execution pipeline
+await db.execute(queryOrSql)    // run SQL string or compiled query, return T
+await db.transaction(fn)        // BEGIN → fn(tx) → COMMIT (auto ROLLBACK on error)
+await db.migrate(...tables)     // CREATE TABLE IF NOT EXISTS + indexes for each table
+db.select(...fields)            // start a SELECT query (untyped)
+db.select_distinct(...fields)   // start a SELECT DISTINCT query
+db.insert_into(table, opts?)    // start an INSERT query
+db.batchInsert(table, opts)     // create an InsertBatcher<T>
+db.update(table)                // start an UPDATE query
+db.delete_from(table)           // start a DELETE query
+db.sql<R>(strings, ...values)   // tagged template for safe raw SQL
+db.dialect                      // dialect name string (readonly)
+db.compiler                     // BaseCompiler instance (readonly)
 ```
 
 ### `SqlTable<S>`
 
 ```ts
-table.tableName, table.columns, table.options
-table.toAst(), table.createTable(), table.createIndexes(), table.dropTable()
-table.from(engine), table.select(), table.insert(), table.update(), table.delete()
-table.bind(engine): BoundTable<S>
+table.tableName                 // table name string
+table.columns                   // column definitions (for type inference)
+table.options                   // table options (engine, orderBy, etc.)
+table.toAst()                   // produce AST for migration tools
+table.createTable(dialect?)     // generate "CREATE TABLE ..." DDL
+table.createIndexes(dialect?)   // generate "CREATE INDEX ..." DDL strings[]
+table.dropTable()               // generate "DROP TABLE IF EXISTS ..."
+table.from(engine)              // start a typed SELECT query
+table.insert(engine)            // start a typed INSERT query
+table.update(engine)            // start a typed UPDATE query
+table.delete(engine)            // start a typed DELETE query
+table.bind(engine)              // return BoundTable<S> (no-repeat-engine API)
 ```
 
 ### `SelectQuery<T>`
@@ -674,9 +706,12 @@ Full chain: `.with()`, `.select()`, `.from()`, `.left_join()`, `.inner_join()`, 
 ### `InsertBatcher<T>`
 
 ```ts
-batcher.write(rowOrRows): void
-await batcher.flush(), await batcher.drain(), await batcher.close()
-batcher.pendingCount, batcher.inflightCount
+batcher.write(rowOrRows)        // add rows to pending queue
+await batcher.flush()           // manually flush pending rows
+await batcher.drain()           // wait for in-flight flush requests
+await batcher.close()           // flush + drain + seal (throws if write() after)
+batcher.pendingCount            // rows waiting behind debounce timer
+batcher.inflightCount           // flush requests currently executing
 ```
 
 ---
