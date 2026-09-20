@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@b1e2bde -->
+<!-- docs: sync from coderbuzz/codex@4eb7d4a -->
 
 # @coderbuzz/sql — AI Expert Knowledge Reference
 
@@ -206,7 +206,7 @@ const users = pg.table("users", {
   email: pg.text().notNull().unique().index(),
   name: pg.varchar(120).notNull(),
   role: pg.varchar(20).default("user"),
-  score: pg.decimal(5, 2).default(0),
+  score: pg.decimal(5, 2).default(0),   // → string (exact); use float() for approximate
   bio: pg.text().nullable(),
   metadata: pg.jsonb<Record<string, unknown>>().nullable(),
   created_at: pg.timestamptz().defaultNow(),
@@ -559,12 +559,14 @@ const batcher = db.batchInsert("events", {
   wait: 50, // ms of inactivity before flush (REQUIRED)
   max: 5_000, // flush when pending reaches this count
   timeout: 2_000, // force flush after this many ms from first write
+  maxInflight: 4, // concurrent flushes allowed before write() waits
   settings: { async_insert: "1" }, // engine-specific (ClickHouse)
+  onError: (err, rows) => { /* REQUIRED — retry or dead-letter these rows */ },
 });
 
-// Write rows
-batcher.write({ id: 1, val: "a" });
-batcher.write([{ id: 2, val: "b" }, { id: 3, val: "c" }]);
+// Write rows — write() returns a promise; awaiting it applies backpressure
+await batcher.write({ id: 1, val: "a" });
+await batcher.write([{ id: 2, val: "b" }, { id: 3, val: "c" }]);
 
 // Inspect state
 batcher.pendingCount; // rows waiting to flush
@@ -578,8 +580,15 @@ await batcher.close(); // flush + drain + seal (throws if write() called after)
 
 **Critical rules:**
 
+- `onError` is REQUIRED. The constructor throws without it. Rows leave the
+  pending queue before the insert runs, so a failed auto-flush has no other way
+  to be observed.
 - Always `await batcher.close()` at the end — never fire-and-forget.
-- After `close()`, calling `write()` throws.
+- After `close()`, calling `write()` rejects.
+- Every row in a batch must have the SAME keys — a batched INSERT has one
+  column list. A differing row rejects. Pass `heterogeneousRows: "union"` to
+  insert the union of all columns with NULL for absent ones.
+- `await` each `write()` in a bulk import; that is what keeps memory flat.
 - Auto-flushes are fire-and-forget internally but tracked — `drain()` waits for
   them.
 
@@ -655,15 +664,63 @@ Placeholder styles per dialect:
 
 ## 14. Transactions
 
+`transaction()` holds ONE connection for the whole callback. Use `tx` for every
+statement inside — `db` is a pool and would run the statement on a different
+connection, outside the transaction.
+
 ```ts
 await db.transaction(async (tx) => {
-  // Use `tx` exactly like `db` inside the transaction
   await users.insert(tx).values([...]).execute();
   await posts.insert(tx).values([...]).execute();
-  // Throws? → auto ROLLBACK
+  // Throws? → ROLLBACK
 });
-// Success → auto COMMIT
+// Success → COMMIT
 ```
+
+### Options
+
+```ts
+await db.transaction(fn, {
+  isolation: "SERIALIZABLE",   // also READ COMMITTED / REPEATABLE READ / READ UNCOMMITTED
+  readOnly: true,              // PostgreSQL / MySQL only
+  setup: [                     // runs inside the transaction, on its connection
+    { sql: `SELECT set_config('app.tenant_id', $1, true)`, params: [tenantId] },
+  ],
+});
+```
+
+`setup` is where `SET LOCAL` belongs — it is the mechanism PostgreSQL
+row-level security depends on, and it is correct only inside a
+single-connection transaction.
+
+### Savepoints
+
+```ts
+await db.transaction(async (tx) => {
+  await postHeader(tx);
+  try {
+    await tx.savepoint(async (sp) => reserveStock(sp));  // rolls back alone
+  } catch { /* header survives */ }
+});
+```
+
+`tx.transaction(...)` inside a transaction becomes a savepoint, not a second
+`BEGIN`. `db.savepoint(...)` outside a transaction throws.
+
+### Row locking
+
+```ts
+tx.select("last_no").from("nomor_faktur").where({ seri: "A" }).forUpdate()
+// .forShare(), .forUpdate({ noWait: true }), .forUpdate({ skipLocked: true })
+```
+
+PostgreSQL / MySQL / Oracle only. SQLite, MSSQL and ClickHouse throw.
+
+### Errors
+
+If the callback fails AND the `ROLLBACK` also fails, a
+`TransactionRollbackError` is thrown carrying both `cause` and `rollbackError`.
+The transaction's outcome is undetermined — reconcile, do not just retry.
 
 ---
 
@@ -726,6 +783,12 @@ max<number>("score", "topScore"); // MAX(score) AS topScore
 ---
 
 ## 18. Column Types by Dialect
+
+> **TypeScript type of exact numerics.** `decimal(p,s)`, `numeric(p,s)`,
+> `bigint()`, `bigserial()` and MSSQL `money()` infer as **`string`**, not
+> `number` — float64 cannot represent them exactly, and `pg`/`mysql2` return
+> them as strings anyway. `integer`, `smallint`, `int`, `serial`, `float`,
+> `real` and `doublePrecision` remain `number`.
 
 ### SQLite
 
@@ -931,9 +994,46 @@ ClickHouse — throws `"RETURNING is not supported by this dialect"`.
 **DO NOT** use `.full_join()` with SQLite, MySQL, or ClickHouse — throws at
 compile time.
 
-**DO NOT** call `batcher.write()` after `batcher.close()` — throws.
+**DO NOT** call `batcher.write()` after `batcher.close()` — rejects.
 
-**DO NOT** forget `await batcher.close()` — rows may be silently lost.
+**DO NOT** forget `await batcher.close()` — rows may be left unwritten.
+
+**DO NOT** use the pooled engine inside a transaction callback. Use `tx`:
+
+```ts
+// WRONG — this INSERT runs on a different connection, outside the transaction
+await db.transaction(async (tx) => { await db.execute(insertSql); });
+
+// CORRECT
+await db.transaction(async (tx) => { await tx.execute(insertSql); });
+```
+
+**DO NOT** pass user input to `.order_by()`, `.group_by()`, `.select()`,
+`.from()`, or a join `ON` condition. These cannot be bound parameters, so they
+are interpolated. They are validated and will throw `UnsafeIdentifierError` on
+anything dangerous, but that is a guard, not a licence — map a sort parameter
+through a fixed allow-list of column names:
+
+```ts
+// WRONG
+query.order_by(req.query.sort);
+
+// CORRECT
+const SORTS = { date: "created_at DESC", amount: "total DESC" } as const;
+query.order_by(SORTS[req.query.sort as keyof typeof SORTS] ?? SORTS.date);
+```
+
+**DO NOT** treat `decimal`/`numeric`/`bigint`/`bigserial` values as numbers.
+They are typed `string` because float64 cannot hold them exactly. `Number(x)`
+on a money column loses cents:
+
+```ts
+// WRONG — reintroduces the precision loss the string type exists to prevent
+const total = rows.reduce((a, r) => a + Number(r.debit), 0);
+
+// CORRECT — sum in SQL, or use a decimal library
+const [{ total }] = await db.sql`SELECT SUM(debit)::text AS total FROM jurnal`.execute();
+```
 
 **DO NOT** use `DELETE` or `UPDATE` without `.where()` unless you intend to
 affect all rows. Add a middleware guard in production code.

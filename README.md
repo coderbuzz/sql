@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@b1e2bde -->
+<!-- docs: sync from coderbuzz/codex@4eb7d4a -->
 
 # @coderbuzz/sql
 
@@ -29,7 +29,7 @@ This is not an ORM. There are no lazy-loaded relations, no magical `save()` meth
 | Learning curve | Steady (ORM conventions) | Low (SQL-like) | Steep (Prisma schema, CLI) | **Low** — you already know SQL |
 | Migration tools | Drizzle Kit (CLI) | Manual | Prisma Migrate (CLI) | **Built-in** — `introspect()` + `diff()` + `applyDiff()` |
 | Batch insert | External | External | `createMany()` | **Built-in batcher** — debounce, timeout, backpressure |
-| Streaming | Limited | No | No | **Built-in** — `stream()` for SQLite, PG |
+| Streaming | Limited | No | No | **Built-in** — cursor-based `stream()` for SQLite, PG |
 | Prepared statements | Some dialects | Some dialects | Via Prisma Client | **Built-in** — SQLite (Bun), PG |
 | Middleware pipeline | Hooks only | No | Middleware | **Plugin system** — `db.use(middleware)` for logging, tracing, safety |
 | Raw SQL tagged templates | Yes | Yes | `$queryRaw` | **Yes** — `db.sql\`SELECT * FROM users WHERE id = ${id}\`` with dialect-aware placeholders |
@@ -55,8 +55,8 @@ This is not an ORM. There are no lazy-loaded relations, no magical `save()` meth
 - **Schema-driven table definitions** — define columns once for DDL + typed queries
 - **Fluent query builders** — SELECT, INSERT, UPDATE, DELETE with full type inference
 - **Safe raw SQL** — `db.sql\`...\`` tagged templates with dialect-aware placeholders
-- **Transactions** — automatic rollback on error, per-dialect isolation
-- **Streaming** — `stream()` for large result sets (SQLite, PostgreSQL)
+- **Transactions** — single-connection, with savepoints, isolation levels, row locking, and `SET LOCAL` setup for RLS
+- **Streaming** — cursor-based `stream()` for large result sets (SQLite, PostgreSQL)
 - **Prepared statements** — `prepare()` with caching (SQLite/Bun, PostgreSQL)
 - **High-throughput batch inserts** — `InsertBatcher` with debounce, row count, and timeout strategies
 - **Schema introspection and migration** — `introspect()`, `diff()`, `applyDiff()` — no CLI needed
@@ -181,7 +181,7 @@ const accounts = pg.table("accounts", {
   id: pg.serial().primaryKey(),
   email: pg.text().notNull().unique().index(),
   display_name: pg.varchar(120).notNull(),
-  balance: pg.decimal(12, 2).default(0),
+  balance: pg.decimal(12, 2).default(0),   // typed as string — exact, no float64
   metadata: pg.jsonb<Record<string, unknown>>().nullable(),
   created_at: pg.timestamptz().defaultNow(),
 });
@@ -255,7 +255,7 @@ const usersV2 = sqlite.table("users", {
 
 const live = await introspect(db);
 const diffs = diff(live, [usersV2.toAst()]);
-const stmts = applyDiff(diffs, sqliteCompiler);
+const stmts = applyDiff(diffs, db);   // pass the engine — it carries the dialect
 
 for (const stmt of stmts) {
   await db.execute(stmt);
@@ -266,10 +266,42 @@ for (const stmt of stmts) {
 
 | Dialect | ADD COLUMN | DROP COLUMN | ALTER COLUMN |
 |---|---|---|---|
-| SQLite | ✓ | skipped (warns) | skipped (warns) |
-| PostgreSQL | ✓ | ✓ | ✓ |
-| MySQL | ✓ | ✓ | ✓ (MODIFY) |
-| MSSQL | ✓ | ✓ | ✓ |
+| SQLite | ✓ | not supported (warns) | not supported (warns) |
+| PostgreSQL | ✓ | opt-in | ✓ |
+| MySQL | ✓ | opt-in | ✓ (MODIFY) |
+| MSSQL | ✓ | opt-in | ✓ |
+
+`diff()` compares type, nullability, uniqueness, primary key **and default
+value**. It cannot tell a rename from a drop-plus-add, so `applyDiff()` omits
+`DROP COLUMN` unless you ask for it:
+
+```ts
+applyDiff(diffs, db, { allowDestructive: true });
+```
+
+Read the statements before enabling it. `ALTER TABLE ... DROP COLUMN` cannot be
+undone once committed, and a renamed column arrives here as a drop.
+
+### Running migrations safely
+
+PostgreSQL has transactional DDL, and an advisory lock keeps two instances from
+migrating at once during a rolling deploy:
+
+```ts
+await db.withAdvisoryLock(872341n, async () => {
+  const stmts = applyDiff(diff(await introspect(db), target), db);
+  // All or nothing — a failure part-way leaves the schema untouched.
+  await db.transaction(async (tx) => {
+    for (const stmt of stmts) await tx.execute(stmt);
+  });
+});
+```
+
+`withAdvisoryLock(key, fn, wait = false)` returns `undefined` instead of
+waiting when another instance holds the lock.
+
+The version ledger, checksums and file loading belong in your application —
+these are the primitives to build them on.
 
 ---
 
@@ -413,14 +445,31 @@ const batcher = db.batchInsert("events", {
   wait: 50,        // flush after 50ms of inactivity
   max: 5_000,      // flush when 5000 rows are pending
   timeout: 2_000,  // force flush after 2000ms
+  maxInflight: 4,  // at most 4 concurrent flushes (backpressure)
+  onError: (err, rows) => deadLetter.push({ err, rows }),  // required
 });
 
 for (const event of events) {
-  batcher.write(event);
+  await batcher.write(event);   // awaiting is what applies backpressure
 }
 
 await batcher.close(); // flush remaining + wait for all in-flight requests
 ```
+
+**`onError` is required.** An auto-flush has no caller to throw to, and rows
+leave the pending queue before the insert runs — so without a handler a failed
+flush discards them with nothing to detect or recover from. The callback
+receives the rows, so they can be retried or written elsewhere.
+
+`await batcher.write(...)` resolves immediately until `maxInflight` flushes are
+outstanding, then waits. Not awaiting is fine for small volumes; for a bulk
+import, awaiting is what keeps memory flat.
+
+Every row in a batch must have the same columns, because a batched `INSERT` has
+one column list. A row with different keys is rejected rather than reshaped —
+previously the extra columns were dropped and the missing ones written as
+`NULL`. Pass `heterogeneousRows: "union"` to insert the union of all columns
+instead, when the absent ones really are optional.
 
 ### ClickHouse High-Throughput Example
 
@@ -428,10 +477,11 @@ await batcher.close(); // flush remaining + wait for all in-flight requests
 const batcher = db.batchInsert("events", {
   wait: 25, max: 10_000, timeout: 1_000,
   settings: { async_insert: "1", wait_for_async_insert: "0" },
+  onError: (err, rows) => console.error("batch gagal", rows.length, err),
 });
 
 for (let i = 0; i < 100_000; i++) {
-  batcher.write({
+  await batcher.write({
     id: crypto.randomUUID(), tenant_id: "acme",
     event_type: i % 2 === 0 ? "view" : "click",
     score: Math.random(), created_at: new Date(),
@@ -493,15 +543,199 @@ SQL injection safe — values are **never** inlined in SQL text.
 
 ---
 
+## Money and Exact Numbers
+
+`decimal()`, `numeric()`, `bigint()`, `bigserial()` and MSSQL `money()` are
+typed as **`string`**, not `number`:
+
+```ts
+const jurnal = pg.table("jurnal", {
+  id:    pg.bigserial().primaryKey(),   // string — int8 exceeds Number's exact range
+  debit: pg.decimal(18, 2),             // string — "1000000.00"
+  rate:  pg.float(),                    // number — approximate by definition
+});
+
+const [row] = await jurnal.from(db).execute();
+row.debit;  // "12345678901234567.89" — every digit intact
+```
+
+A JavaScript `number` is a float64: exact only to 2^53-1, and unable to
+represent most decimal fractions. Through it, `"12345678901234567.89"` becomes
+`12345678901234568`, and `debit === credit` starts failing by fractions of a
+cent. This is also what the drivers already do — `pg` and `mysql2` return these
+columns as strings for exactly this reason — so the declared type now matches
+the value you actually receive.
+
+Do the arithmetic where it is exact:
+
+```ts
+// In the database
+const [{ total }] = await db.execute(
+  db.sql`SELECT SUM(debit)::text AS total FROM jurnal WHERE jurnal_id = ${id}`.toSQL(),
+);
+
+// Or in a decimal library
+import Decimal from "decimal.js";
+const balanced = new Decimal(totalDebit).equals(totalKredit);
+```
+
+`INTEGER`, `SMALLINT`, `SERIAL`, `FLOAT`, `REAL` and `DOUBLE PRECISION` are
+still `number` — their ranges fit, or they are approximate by nature.
+
+> Row values are parsed only on the typed path (`table.from(db).execute()`),
+> which knows the schema. `db.execute(sql)` returns rows exactly as the driver
+> produced them.
+
+---
+
+## Identifiers Are Not Parameters
+
+`ORDER BY`, `GROUP BY`, the select list, table names and join `ON` conditions
+cannot be bound parameters — SQL has no placeholder for a name. They are
+interpolated, and are validated before they reach the statement:
+
+```ts
+db.select("*").from("jurnal").order_by(req.query.sort);
+// UnsafeIdentifierError: ";" would terminate the statement and start another
+```
+
+Rejected: statement terminators, SQL comments, line breaks, unterminated
+quotes, and keywords that would open a new clause or statement (`SELECT`,
+`UNION`, `FROM`, `DROP`, …). `limit()` and `offset()` must be non-negative safe
+integers, checked at runtime — their `number` signature does not stop a query
+string from arriving through an `any`.
+
+Accepted as before: `"created_at DESC"`, `"amount DESC NULLS LAST"`,
+`"COUNT(*) AS total"`, `"users u"`, `"p.user_id = u.id"`, `'"order" ASC'`,
+`"amount::text"`.
+
+This is a guard, not a licence: **do not pass user input into these clauses.**
+Map a sort parameter through a fixed allow-list of column names. For anything
+the builder does not cover, use the parameterised `` db.sql`...` `` template.
+`assertSafeFragment()` is exported if you want to validate a fragment yourself.
+
+> `where()` was never affected — it has always been parameterised with quoted
+> identifiers.
+
+---
+
 ## Transactions
+
+`transaction()` checks out **one connection** and runs everything on it, so the
+statements are genuinely atomic. Use the `tx` handle the callback receives —
+not the outer engine — for every statement inside: the engine is a pool and
+hands out a different connection per statement, which would place the statement
+outside the transaction.
 
 ```ts
 await db.transaction(async (tx) => {
   await users.insert(tx).values([{ email: "ada@example.com", name: "Ada" }]).execute();
   await auditLog.insert(tx).values([{ action: "user.created", actor: "system" }]).execute();
 });
-// Auto-rollback on error
+// Rolled back in full if the callback throws.
 ```
+
+Supported on PostgreSQL, MySQL, MSSQL and SQLite. If a `ROLLBACK` itself fails,
+the outcome is undetermined, so a `TransactionRollbackError` carrying both
+errors is thrown rather than the failure being reported as a clean rollback.
+
+### Isolation level and read-only
+
+```ts
+// A report that must see one consistent snapshot across several tables.
+const report = await db.transaction(async (tx) => buildNeraca(tx), {
+  isolation: "SERIALIZABLE",
+  readOnly: true,
+});
+```
+
+A dialect that cannot honour the requested level throws rather than quietly
+downgrading it.
+
+### Savepoints (nested transactions)
+
+A failure inside a savepoint rolls back only that work and leaves the enclosing
+transaction usable — what a modular monolith needs when one module calls
+another inside a shared transaction.
+
+```ts
+await db.transaction(async (tx) => {
+  await postJournalHeader(tx);
+  try {
+    await tx.savepoint(async (sp) => reserveStock(sp));
+  } catch {
+    // stock reservation undone; the journal header survives
+  }
+});
+```
+
+Calling `transaction()` on a handle that is already in a transaction opens a
+savepoint rather than a second, invalid `BEGIN`, so transactions compose.
+
+### Row locking
+
+```ts
+await db.transaction(async (tx) => {
+  const [row] = await tx.execute(
+    tx.select("last_no").from("nomor_faktur").where({ seri: "A" }).forUpdate().toSQL(),
+  );
+  // No other transaction can take this row until we commit, so two concurrent
+  // requests cannot allocate the same invoice number.
+});
+```
+
+`.forUpdate()` and `.forShare()` accept `{ noWait }` or `{ skipLocked }`.
+SQLite, MSSQL and ClickHouse reject them rather than emitting a query that
+silently takes no lock.
+
+### Multi-tenancy with row-level security
+
+`setup` statements run inside the transaction scope, on the transaction's own
+connection. That is the only place `SET LOCAL` is correct — it applies solely
+within a transaction and solely on the connection it ran on.
+
+```ts
+await db.transaction(async (tx) => {
+  // Every statement here is filtered by the RLS policy for this tenant.
+  return tx.execute(tx.select("*").from("jurnal").toSQL());
+}, {
+  setup: [{ sql: `SELECT set_config('app.tenant_id', $1, true)`, params: [tenantId] }],
+});
+```
+
+### Tenant-scoped handles
+
+`setup` is the primitive. For shared-schema multi-tenancy, prefer the handle
+that makes the tenant impossible to omit:
+
+```ts
+import { tenantId, type TenantScopedSql } from "@coderbuzz/sql";
+
+const db = engine.forTenant(tenantId(claims.tenant_id));
+
+// Every query through this handle — including a single execute() — runs in a
+// transaction that has already bound the tenant.
+const rows = await db.select("*").from("invoice").execute();
+```
+
+`TenantScopedSql` is branded and does not extend `Sql`, so typing a function
+parameter as `TenantScopedSql` makes the compiler reject an unscoped engine at
+the call site. Inside a tenant transaction, `SET`, `RESET`, `DISCARD` and
+`set_config` are rejected — the binding cannot be changed or outlive the
+transaction.
+
+Work that genuinely spans tenants goes through a separate, deliberately
+awkward path that needs its own `BYPASSRLS` role:
+
+```ts
+await engine.unsafeCrossTenant("laporan konsolidasi", async (admin) =>
+  admin.execute(`SELECT tenant_id, SUM(total) FROM invoice GROUP BY tenant_id`),
+);
+```
+
+**Full guide:** [docs/multi-tenancy.md](../../docs/multi-tenancy.md) — policy SQL,
+the JWT-to-query path, double-entry posting, background jobs, cross-tenant
+reporting, and a checklist for every new table.
 
 ---
 
@@ -547,17 +781,25 @@ for await (const row of users.from(db).where({ active: true }).stream()) {
 }
 ```
 
-Supported by: SQLite (Bun), PostgreSQL.
+Supported by: SQLite (Bun) and PostgreSQL, both through a real cursor — memory
+stays flat regardless of result size. On PostgreSQL the batch size is
+`streamBatchSize` (default 1000) rows per round trip. Breaking out of the loop
+early closes the cursor and releases the connection.
 
 ### Prepared Queries
 
 ```ts
 const prepared = users.from(db).where({ id: 1 }).prepare();
 const rows = await prepared.execute();
-prepared.close();
+await prepared.close();
 ```
 
 Supported by: SQLite (Bun), PostgreSQL.
+
+On PostgreSQL a named prepared statement is per-connection state, so the
+statement holds one dedicated pool connection for its lifetime and `DEALLOCATE`s
+it on `close()`. **Always close it** — until you do, that connection is checked
+out.
 
 ---
 
@@ -762,7 +1004,7 @@ const db = pg.connect({ connectionString: process.env.DATABASE_URL });
 const accounts = pg.table("accounts", {
   id: pg.serial().primaryKey(),
   owner: pg.text().notNull(),
-  balance: pg.decimal(12, 2).default(0),
+  balance: pg.decimal(12, 2).default(0),   // typed as string — exact, no float64
 });
 
 await db.migrate(accounts);
