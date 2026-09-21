@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@4eb7d4a -->
+<!-- docs: sync from coderbuzz/codex@d28b4e9 -->
 
 # @coderbuzz/sql
 

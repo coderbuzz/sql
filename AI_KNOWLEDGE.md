@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@4eb7d4a -->
+<!-- docs: sync from coderbuzz/codex@d28b4e9 -->
 
 # @coderbuzz/sql — AI Expert Knowledge Reference
 
@@ -1034,6 +1034,22 @@ const total = rows.reduce((a, r) => a + Number(r.debit), 0);
 // CORRECT — sum in SQL, or use a decimal library
 const [{ total }] = await db.sql`SELECT SUM(debit)::text AS total FROM jurnal`.execute();
 ```
+
+**DO validate incoming amounts with `decimal()` from `@coderbuzz/veta`**, not
+`number()`. It takes and returns the same normalized string this package uses,
+so there is no conversion at the HTTP boundary — and conversions are where
+precision goes:
+
+```ts
+import { decimal, object } from "@coderbuzz/veta";
+
+const postJournal = object({
+  ref: string(),
+  amount: decimal({ precision: 18, scale: 2 }), // "1234.5" → "1234.50"
+});
+```
+
+`number()` would accept `1234.5` as a float64 and hand it on looking exact.
 
 **DO NOT** use `DELETE` or `UPDATE` without `.where()` unless you intend to
 affect all rows. Add a middleware guard in production code.
