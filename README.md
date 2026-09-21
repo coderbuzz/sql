@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@d28b4e9 -->
+<!-- docs: sync from coderbuzz/codex@b8d6f33 -->
 
 # @coderbuzz/sql
 
@@ -272,15 +272,33 @@ for (const stmt of stmts) {
 | MSSQL | ✓ | opt-in | ✓ |
 
 `diff()` compares type, nullability, uniqueness, primary key **and default
-value**. It cannot tell a rename from a drop-plus-add, so `applyDiff()` omits
-`DROP COLUMN` unless you ask for it:
+value**. `applyDiff()` omits `DROP COLUMN` unless you ask for it:
 
 ```ts
 applyDiff(diffs, db, { allowDestructive: true });
 ```
 
-Read the statements before enabling it. `ALTER TABLE ... DROP COLUMN` cannot be
-undone once committed, and a renamed column arrives here as a drop.
+Read the statements before enabling it — `ALTER TABLE ... DROP COLUMN` cannot be
+undone once committed.
+
+**Renaming a column.** A rename is not something two schemas can reveal: `memo`
+disappearing and `keterangan` appearing looks identical whether it is a rename or
+a genuine drop-and-add. Guessing means sometimes emitting `ALTER ... RENAME` for
+a column that should have been dropped, keeping data that was meant to go under a
+name that now means something else. So say it:
+
+```ts
+const journal = new SqlTable("journal", {
+  keterangan: pg.varchar(255).renamedFrom("memo"),
+});
+```
+
+`diff()` then produces `renameColumns` instead of an add plus a drop, and
+`applyDiff()` emits `ALTER TABLE journal RENAME COLUMN memo TO keterangan` —
+before any `ADD COLUMN`, so the data moves with the name. If the rename also
+changes the column's type, both statements are emitted. Once the migration has
+run everywhere, drop the annotation: with the old name gone from the database,
+it does nothing.
 
 ### Running migrations safely
 
@@ -324,7 +342,7 @@ const rows = await db.select_distinct("country").from("users").execute();
 
 // JOIN
 const rows = await db.select("u.id", "u.email", "p.title")
-  .from("users u").left_join("posts p", "p.user_id = u.id")
+  .from("users u").left_join("posts p", "p.user_id = u.id")  // untyped; see join() below
   .where(pg.eq("u.active", true)).execute();
 
 // GROUP BY / HAVING
@@ -350,6 +368,40 @@ const compiled = users.from(db).fields("id", "email").where({ active: true }).to
 console.log(compiled.sql); // "SELECT "id", "email" FROM users WHERE active = ?"
 console.log(compiled.params); // [true]
 ```
+
+### Typed joins
+
+`SqlTable.from(db)` gives a typed query — but until now the first `left_join()`
+dropped you back to raw strings and took the joined table's column types with it.
+The typed form states the join as column pairs:
+
+```ts
+const rows = await journalLines.from(db)
+  .join(accounts, { left: "account_id", right: "id" })
+  .leftJoin(entries, { left: "entry_id", right: "id" })
+  .order_by(["amount", "DESC"])
+  .execute();
+```
+
+| | |
+|---|---|
+| `join(table, on)` | INNER JOIN. Row type gains the joined table's columns |
+| `leftJoin(table, on)` | LEFT JOIN. **The joined columns become nullable** — which is what a LEFT JOIN produces for an unmatched row |
+| `rightJoin(table, on)` | RIGHT JOIN. The base table's columns become nullable instead |
+| `fullJoin(table, on)` | FULL JOIN. Both sides become nullable |
+
+`on` is `{ left, right }`, or an array of them for a composite key. `left` is a
+column of the query so far — the base table or anything already joined — and
+`right` a column of the table being joined. Both are checked against their
+schemas, so a typo is a compile error, and there is no string for anything else
+to end up inside.
+
+`order_by()` and `group_by()` on a typed query accept the columns the query can
+actually see, including the joined ones. `order_by` also takes
+`[column, "ASC" | "DESC"]`. A raw string still works and is still validated by
+the identifier check, so nothing existing breaks.
+
+The untyped `left_join(table: string, on: string)` family is unchanged.
 
 ### Explain Query
 

@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@d28b4e9 -->
+<!-- docs: sync from coderbuzz/codex@b8d6f33 -->
 
 # @coderbuzz/sql — AI Expert Knowledge Reference
 
@@ -302,8 +302,29 @@ for (const stmt of stmts) {
 }
 ```
 
-`applyDiff()` supports: ADD COLUMN (all dialects), DROP COLUMN (PG/MySQL/MSSQL),
-ALTER COLUMN (PG/MySQL/MSSQL). SQLite skips DROP/ALTER with a `console.warn`.
+`applyDiff()` supports: RENAME COLUMN (all dialects), ADD COLUMN (all dialects),
+DROP COLUMN (PG/MySQL/MSSQL), ALTER COLUMN (PG/MySQL/MSSQL). SQLite skips
+DROP/ALTER with a `console.warn`.
+
+**Renaming a column.** `diff()` cannot infer a rename — `memo` disappearing and
+`keterangan` appearing is indistinguishable from a genuine drop-and-add, and
+guessing means sometimes emitting `ALTER ... RENAME` for a column that should
+have been dropped, keeping data that was meant to go under a name that now means
+something else. Declare it on the schema:
+
+```ts
+new SqlTable('journal', { keterangan: pg.varchar(255).renamedFrom('memo') })
+```
+
+`diff()` then fills `TableDiff.renameColumns` instead of producing an add plus a
+drop, and `applyDiff()` emits
+`ALTER TABLE journal RENAME COLUMN memo TO keterangan` **before** any
+`ADD COLUMN`, so the data moves with the name. A rename that also changes the
+column's type emits both statements. The annotation is inert once the old name
+is gone from the database, so it is safe to leave in place until every
+environment has migrated. `renameColumns` is optional on `TableDiff`, so a
+hand-built diff still compiles. The annotation survives the other column
+modifiers (`.notNull()`, `.index()`, …).
 
 ---
 
@@ -351,6 +372,8 @@ const rows = await db.select("u.id", "u.name", "p.title")
 
 ### Joins
 
+**Untyped** — raw strings, validated by the identifier check:
+
 ```ts
 db.select("u.id", "p.title")
   .from("users u")
@@ -359,6 +382,50 @@ db.select("u.id", "p.title")
   .right_join("authors a", "a.id = p.author"); // RIGHT JOIN
 // .full_join() — NOT supported by SQLite, MySQL, ClickHouse
 ```
+
+**Typed** — from a `SqlTable`, stated as column pairs:
+
+```ts
+journalLines.from(db)
+  .join(accounts, { left: 'account_id', right: 'id' })    // INNER
+  .leftJoin(entries, { left: 'entry_id', right: 'id' })   // LEFT
+  .rightJoin(table, on)                                    // RIGHT
+  .fullJoin(table, on)                                     // FULL
+```
+
+```ts
+type JoinOn<L, R> =
+  | { left: keyof L & string; right: keyof R & string }
+  | ReadonlyArray<{ left: keyof L & string; right: keyof R & string }>
+```
+
+`left` is a column of the query so far — the base table or anything already
+joined — `right` a column of the table being joined. Both are checked against
+their schemas: a typo is a compile error, and there is no string left for
+anything else to end up inside. An array of pairs joins them with `AND`.
+
+**Result types track outer-join nullability**, which is the part worth having:
+
+| | Result |
+|---|---|
+| `join` | `TResult & InferRow<S2>` |
+| `leftJoin` | `TResult & Nullable<InferRow<S2>>` |
+| `rightJoin` | `Nullable<TResult> & InferRow<S2>` |
+| `fullJoin` | `Nullable<TResult> & Nullable<InferRow<S2>>` |
+
+`order_by()` and `group_by()` on a typed query accept columns of the base table
+**and** of everything joined; `order_by` also takes `[column, 'ASC' | 'DESC']`. A
+raw string still works — the validator still runs on it — so nothing existing
+breaks.
+
+Why this exists: `SqlTable.from()` gave a typed query, but `TypedSelectQuery`
+inherited `left_join`/`order_by`/`group_by` from `SelectQuery` unchanged, so the
+first join dropped you back to raw strings and took the joined table's column
+types with it. The identifier validator had already closed the injection surface;
+this makes the safe path the convenient one.
+
+Dialect limits still apply: SQLite, MySQL and ClickHouse reject `fullJoin` at
+compile time, the same as `.full_join()`.
 
 ### CTE
 
