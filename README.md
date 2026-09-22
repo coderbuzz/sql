@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@b8d6f33 -->
+<!-- docs: sync from coderbuzz/codex@200be78 -->
 
 # @coderbuzz/sql
 
@@ -13,9 +13,9 @@
   <a href="https://codecov.io/gh/coderbuzz/sql"><img src="https://codecov.io/gh/coderbuzz/sql/graph/badge.svg" alt="Codecov" /></a>
 </p>
 
-`@coderbuzz/sql` is a type-safe SQL toolkit that gives you the **full power of SQL** without the abstraction leaks of ORMs or the verbosity of raw query builders. Write schema definitions once, then use them for DDL, typed queries, migrations, batch inserts, and streaming — across **8 database dialects**.
+`@coderbuzz/sql` is a type-safe SQL toolkit that gives you the **full power of SQL** without the abstraction leaks of ORMs or the verbosity of raw query builders. Write schema definitions once, then use them across **8 database dialects** for DDL, typed queries, migrations, batch inserts, and streaming.
 
-This is not an ORM. There are no lazy-loaded relations, no magical `save()` methods, no hidden N+1 queries. You write SQL — but with **full type safety**, **fluent query builders**, **dialect-aware compilation**, and **zero runtime overhead** compared to hand-written queries.
+This is not an ORM. There are no lazy-loaded relations, no magical `save()` methods, no hidden N+1 queries. You write SQL, but with **full type safety**, **fluent query builders**, **dialect-aware compilation**, and **zero runtime overhead** compared to hand-written queries.
 
 ---
 
@@ -24,48 +24,48 @@ This is not an ORM. There are no lazy-loaded relations, no magical `save()` meth
 | Pain Point | Drizzle ORM | Kysely | Prisma | **@coderbuzz/sql** |
 |---|---|---|---|---|
 | Runtime agnostic | Bun, Node, Deno | Bun, Node, Deno | Node only | **Bun, Node, Deno** |
-| Dialects supported | 5 (SQLite, PG, MySQL, PG, SQLite) | 6 | 5 (with connectors) | **8** — SQLite, PG, MySQL, MSSQL, ClickHouse, Oracle, Snowflake, Databricks |
-| Query builder vs ORM | Hybrid (ORM-like) | Query builder | ORM (magic) | **Query builder** — full SQL control |
-| Learning curve | Steady (ORM conventions) | Low (SQL-like) | Steep (Prisma schema, CLI) | **Low** — you already know SQL |
-| Migration tools | Drizzle Kit (CLI) | Manual | Prisma Migrate (CLI) | **Built-in** — `introspect()` + `diff()` + `applyDiff()` |
-| Batch insert | External | External | `createMany()` | **Built-in batcher** — debounce, timeout, backpressure |
-| Streaming | Limited | No | No | **Built-in** — cursor-based `stream()` for SQLite, PG |
-| Prepared statements | Some dialects | Some dialects | Via Prisma Client | **Built-in** — SQLite (Bun), PG |
-| Middleware pipeline | Hooks only | No | Middleware | **Plugin system** — `db.use(middleware)` for logging, tracing, safety |
-| Raw SQL tagged templates | Yes | Yes | `$queryRaw` | **Yes** — `db.sql\`SELECT * FROM users WHERE id = ${id}\`` with dialect-aware placeholders |
-| ClickHouse support | No | No | No | **Native** — with MergeTree engine options |
-| Bundle size | ~100 KB+ | ~50 KB | ~5 MB+ | **<30 KB gzip** — tree-shakeable |
+| Dialects supported | 5 (SQLite, PG, MySQL, PG, SQLite) | 6 | 5 (with connectors) | **8**: SQLite, PG, MySQL, MSSQL, ClickHouse, Oracle, Snowflake, Databricks |
+| Query builder vs ORM | Hybrid (ORM-like) | Query builder | ORM (magic) | **Query builder**: full SQL control |
+| Learning curve | Steady (ORM conventions) | Low (SQL-like) | Steep (Prisma schema, CLI) | **Low**: you already know SQL |
+| Migration tools | Drizzle Kit (CLI) | Manual | Prisma Migrate (CLI) | **Built-in**: `introspect()` + `diff()` + `applyDiff()` |
+| Batch insert | External | External | `createMany()` | **Built-in batcher**: debounce, timeout, backpressure |
+| Streaming | Limited | No | No | **Built-in**: cursor-based `stream()` for SQLite, PG |
+| Prepared statements | Some dialects | Some dialects | Via Prisma Client | **Built-in**: SQLite (Bun), PG |
+| Middleware pipeline | Hooks only | No | Middleware | **Plugin system**: `db.use(middleware)` for logging, tracing, safety |
+| Raw SQL tagged templates | Yes | Yes | `$queryRaw` | **Yes**: `db.sql\`SELECT * FROM users WHERE id = ${id}\`` with dialect-aware placeholders |
+| ClickHouse support | No | No | No | **Native**: with MergeTree engine options |
+| Bundle size | ~100 KB+ | ~50 KB | ~5 MB+ | **<30 KB gzip**: tree-shakeable |
 
 ---
 
 ## When to Use This
 
 - **You want type safety** without an ORM's magic
-- **You need multi-dialect support** — one codebase for SQLite dev and PostgreSQL prod
-- **You need ClickHouse, Snowflake, or Databricks support** — Drizzle and Kysely don't cover these
-- **You want full control** over SQL output — every query is inspectable via `.toSQL()`
-- **You need high-throughput batch inserts** — debounce, timeout, and backpressure built in
-- **You want schema migrations** without a CLI — introspect live DBs, diff against schemas, generate ALTER TABLE
+- **You need multi-dialect support**: one codebase for SQLite dev and PostgreSQL prod
+- **You need ClickHouse, Snowflake, or Databricks support**: Drizzle and Kysely don't cover these
+- **You want full control** over SQL output: every query is inspectable via `.toSQL()`
+- **You need high-throughput batch inserts**: debounce, timeout, and backpressure built in
+- **You want schema migrations** without a CLI: introspect live DBs, diff against schemas, generate ALTER TABLE
 
 ---
 
 ## Features
 
-- **8 databases** — SQLite, PostgreSQL, MySQL/MariaDB, SQL Server, ClickHouse, Oracle, Snowflake, Databricks/Spark SQL
-- **Schema-driven table definitions** — define columns once for DDL + typed queries
-- **Fluent query builders** — SELECT, INSERT, UPDATE, DELETE with full type inference
-- **Safe raw SQL** — `db.sql\`...\`` tagged templates with dialect-aware placeholders
-- **Transactions** — single-connection, with savepoints, isolation levels, row locking, and `SET LOCAL` setup for RLS
-- **Streaming** — cursor-based `stream()` for large result sets (SQLite, PostgreSQL)
-- **Prepared statements** — `prepare()` with caching (SQLite/Bun, PostgreSQL)
-- **High-throughput batch inserts** — `InsertBatcher` with debounce, row count, and timeout strategies
-- **Schema introspection and migration** — `introspect()`, `diff()`, `applyDiff()` — no CLI needed
-- **Middleware pipeline** — `db.use()` for logging, metrics, safety guards, tracing
-- **CTE, JOIN, UNION, subqueries** — full SQL composition
-- **Expression helpers** — `eq`, `and`, `or`, `inList`, `isNull`, `like`, `ilike`, `raw`, etc.
-- **Aggregate helpers** — `count`, `sum`, `avg`, `min`, `max`
-- **Infer types** — `InferRow<S>`, `InferSelect<S, F>` for subset field selection
-- **Runtime agnostic** — Bun, Node.js, Deno
+- **8 databases**: SQLite, PostgreSQL, MySQL/MariaDB, SQL Server, ClickHouse, Oracle, Snowflake, Databricks/Spark SQL
+- **Schema-driven table definitions**: define columns once for DDL + typed queries
+- **Fluent query builders**: SELECT, INSERT, UPDATE, DELETE with full type inference
+- **Safe raw SQL**: `db.sql\`...\`` tagged templates with dialect-aware placeholders
+- **Transactions**: single-connection, with savepoints, isolation levels, row locking, and `SET LOCAL` setup for RLS
+- **Streaming**: cursor-based `stream()` for large result sets (SQLite, PostgreSQL)
+- **Prepared statements**: `prepare()` with caching (SQLite/Bun, PostgreSQL)
+- **High-throughput batch inserts**: `InsertBatcher` with debounce, row count, and timeout strategies
+- **Schema introspection and migration**: `introspect()`, `diff()`, `applyDiff()`, no CLI needed
+- **Middleware pipeline**: `db.use()` for logging, metrics, safety guards, tracing
+- **CTE, JOIN, UNION, subqueries**: full SQL composition
+- **Expression helpers**: `eq`, `and`, `or`, `inList`, `isNull`, `like`, `ilike`, `raw`, etc.
+- **Aggregate helpers**: `count`, `sum`, `avg`, `min`, `max`
+- **Infer types**: `InferRow<S>`, `InferSelect<S, F>` for subset field selection
+- **Runtime agnostic**: Bun, Node.js, Deno
 
 ## Benchmarks
 
@@ -181,7 +181,7 @@ const accounts = pg.table("accounts", {
   id: pg.serial().primaryKey(),
   email: pg.text().notNull().unique().index(),
   display_name: pg.varchar(120).notNull(),
-  balance: pg.decimal(12, 2).default(0),   // typed as string — exact, no float64
+  balance: pg.decimal(12, 2).default(0),   // typed as string: exact, no float64
   metadata: pg.jsonb<Record<string, unknown>>().nullable(),
   created_at: pg.timestamptz().defaultNow(),
 });
@@ -255,7 +255,7 @@ const usersV2 = sqlite.table("users", {
 
 const live = await introspect(db);
 const diffs = diff(live, [usersV2.toAst()]);
-const stmts = applyDiff(diffs, db);   // pass the engine — it carries the dialect
+const stmts = applyDiff(diffs, db);   // pass the engine: it carries the dialect
 
 for (const stmt of stmts) {
   await db.execute(stmt);
@@ -278,7 +278,7 @@ value**. `applyDiff()` omits `DROP COLUMN` unless you ask for it:
 applyDiff(diffs, db, { allowDestructive: true });
 ```
 
-Read the statements before enabling it — `ALTER TABLE ... DROP COLUMN` cannot be
+Read the statements before enabling it. `ALTER TABLE ... DROP COLUMN` cannot be
 undone once committed.
 
 **Renaming a column.** A rename is not something two schemas can reveal: `memo`
@@ -294,7 +294,7 @@ const journal = new SqlTable("journal", {
 ```
 
 `diff()` then produces `renameColumns` instead of an add plus a drop, and
-`applyDiff()` emits `ALTER TABLE journal RENAME COLUMN memo TO keterangan` —
+`applyDiff()` emits `ALTER TABLE journal RENAME COLUMN memo TO keterangan`,
 before any `ADD COLUMN`, so the data moves with the name. If the rename also
 changes the column's type, both statements are emitted. Once the migration has
 run everywhere, drop the annotation: with the old name gone from the database,
@@ -308,7 +308,7 @@ migrating at once during a rolling deploy:
 ```ts
 await db.withAdvisoryLock(872341n, async () => {
   const stmts = applyDiff(diff(await introspect(db), target), db);
-  // All or nothing — a failure part-way leaves the schema untouched.
+  // All or nothing: a failure part-way leaves the schema untouched.
   await db.transaction(async (tx) => {
     for (const stmt of stmts) await tx.execute(stmt);
   });
@@ -318,8 +318,8 @@ await db.withAdvisoryLock(872341n, async () => {
 `withAdvisoryLock(key, fn, wait = false)` returns `undefined` instead of
 waiting when another instance holds the lock.
 
-The version ledger, checksums and file loading belong in your application —
-these are the primitives to build them on.
+The version ledger, checksums and file loading belong in your application.
+These are the primitives to build them on.
 
 ---
 
@@ -371,7 +371,7 @@ console.log(compiled.params); // [true]
 
 ### Typed joins
 
-`SqlTable.from(db)` gives a typed query — but until now the first `left_join()`
+`SqlTable.from(db)` gives a typed query, but until now the first `left_join()`
 dropped you back to raw strings and took the joined table's column types with it.
 The typed form states the join as column pairs:
 
@@ -386,12 +386,12 @@ const rows = await journalLines.from(db)
 | | |
 |---|---|
 | `join(table, on)` | INNER JOIN. Row type gains the joined table's columns |
-| `leftJoin(table, on)` | LEFT JOIN. **The joined columns become nullable** — which is what a LEFT JOIN produces for an unmatched row |
+| `leftJoin(table, on)` | LEFT JOIN. **The joined columns become nullable**, which is what a LEFT JOIN produces for an unmatched row |
 | `rightJoin(table, on)` | RIGHT JOIN. The base table's columns become nullable instead |
 | `fullJoin(table, on)` | FULL JOIN. Both sides become nullable |
 
 `on` is `{ left, right }`, or an array of them for a composite key. `left` is a
-column of the query so far — the base table or anything already joined — and
+column of the query so far (the base table or anything already joined) and
 `right` a column of the table being joined. Both are checked against their
 schemas, so a typo is a compile error, and there is no string for anything else
 to end up inside.
@@ -509,7 +509,7 @@ await batcher.close(); // flush remaining + wait for all in-flight requests
 ```
 
 **`onError` is required.** An auto-flush has no caller to throw to, and rows
-leave the pending queue before the insert runs — so without a handler a failed
+leave the pending queue before the insert runs, so without a handler a failed
 flush discards them with nothing to detect or recover from. The callback
 receives the rows, so they can be retried or written elsewhere.
 
@@ -518,8 +518,8 @@ outstanding, then waits. Not awaiting is fine for small volumes; for a bulk
 import, awaiting is what keeps memory flat.
 
 Every row in a batch must have the same columns, because a batched `INSERT` has
-one column list. A row with different keys is rejected rather than reshaped —
-previously the extra columns were dropped and the missing ones written as
+one column list. A row with different keys is rejected rather than reshaped.
+Previously the extra columns were dropped and the missing ones written as
 `NULL`. Pass `heterogeneousRows: "union"` to insert the union of all columns
 instead, when the absent ones really are optional.
 
@@ -591,7 +591,7 @@ const q = pgDb.sql`SELECT * FROM users WHERE id = ${5} AND name = ${"Bob"}`;
 // q.sql: "SELECT * FROM users WHERE id = $1 AND name = $2"
 ```
 
-SQL injection safe — values are **never** inlined in SQL text.
+SQL injection safe: values are **never** inlined in SQL text.
 
 ---
 
@@ -602,20 +602,20 @@ typed as **`string`**, not `number`:
 
 ```ts
 const jurnal = pg.table("jurnal", {
-  id:    pg.bigserial().primaryKey(),   // string — int8 exceeds Number's exact range
-  debit: pg.decimal(18, 2),             // string — "1000000.00"
-  rate:  pg.float(),                    // number — approximate by definition
+  id:    pg.bigserial().primaryKey(),   // string: int8 exceeds Number's exact range
+  debit: pg.decimal(18, 2),             // string: "1000000.00"
+  rate:  pg.float(),                    // number: approximate by definition
 });
 
 const [row] = await jurnal.from(db).execute();
-row.debit;  // "12345678901234567.89" — every digit intact
+row.debit;  // "12345678901234567.89", every digit intact
 ```
 
 A JavaScript `number` is a float64: exact only to 2^53-1, and unable to
 represent most decimal fractions. Through it, `"12345678901234567.89"` becomes
 `12345678901234568`, and `debit === credit` starts failing by fractions of a
-cent. This is also what the drivers already do — `pg` and `mysql2` return these
-columns as strings for exactly this reason — so the declared type now matches
+cent. This is also what the drivers already do: `pg` and `mysql2` return these
+columns as strings for exactly this reason, so the declared type now matches
 the value you actually receive.
 
 Do the arithmetic where it is exact:
@@ -632,7 +632,7 @@ const balanced = new Decimal(totalDebit).equals(totalKredit);
 ```
 
 `INTEGER`, `SMALLINT`, `SERIAL`, `FLOAT`, `REAL` and `DOUBLE PRECISION` are
-still `number` — their ranges fit, or they are approximate by nature.
+still `number`: their ranges fit, or they are approximate by nature.
 
 > Row values are parsed only on the typed path (`table.from(db).execute()`),
 > which knows the schema. `db.execute(sql)` returns rows exactly as the driver
@@ -643,7 +643,7 @@ still `number` — their ranges fit, or they are approximate by nature.
 ## Identifiers Are Not Parameters
 
 `ORDER BY`, `GROUP BY`, the select list, table names and join `ON` conditions
-cannot be bound parameters — SQL has no placeholder for a name. They are
+cannot be bound parameters: SQL has no placeholder for a name. They are
 interpolated, and are validated before they reach the statement:
 
 ```ts
@@ -654,7 +654,7 @@ db.select("*").from("jurnal").order_by(req.query.sort);
 Rejected: statement terminators, SQL comments, line breaks, unterminated
 quotes, and keywords that would open a new clause or statement (`SELECT`,
 `UNION`, `FROM`, `DROP`, …). `limit()` and `offset()` must be non-negative safe
-integers, checked at runtime — their `number` signature does not stop a query
+integers, checked at runtime: their `number` signature does not stop a query
 string from arriving through an `any`.
 
 Accepted as before: `"created_at DESC"`, `"amount DESC NULLS LAST"`,
@@ -666,7 +666,7 @@ Map a sort parameter through a fixed allow-list of column names. For anything
 the builder does not cover, use the parameterised `` db.sql`...` `` template.
 `assertSafeFragment()` is exported if you want to validate a fragment yourself.
 
-> `where()` was never affected — it has always been parameterised with quoted
+> `where()` was never affected. It has always been parameterised with quoted
 > identifiers.
 
 ---
@@ -674,8 +674,8 @@ the builder does not cover, use the parameterised `` db.sql`...` `` template.
 ## Transactions
 
 `transaction()` checks out **one connection** and runs everything on it, so the
-statements are genuinely atomic. Use the `tx` handle the callback receives —
-not the outer engine — for every statement inside: the engine is a pool and
+statements are genuinely atomic. Use the `tx` handle the callback receives
+(not the outer engine) for every statement inside: the engine is a pool and
 hands out a different connection per statement, which would place the statement
 outside the transaction.
 
@@ -707,7 +707,7 @@ downgrading it.
 ### Savepoints (nested transactions)
 
 A failure inside a savepoint rolls back only that work and leaves the enclosing
-transaction usable — what a modular monolith needs when one module calls
+transaction usable. That is what a modular monolith needs when one module calls
 another inside a shared transaction.
 
 ```ts
@@ -743,7 +743,7 @@ silently takes no lock.
 ### Multi-tenancy with row-level security
 
 `setup` statements run inside the transaction scope, on the transaction's own
-connection. That is the only place `SET LOCAL` is correct — it applies solely
+connection. That is the only place `SET LOCAL` is correct: it applies solely
 within a transaction and solely on the connection it ran on.
 
 ```ts
@@ -765,7 +765,7 @@ import { tenantId, type TenantScopedSql } from "@coderbuzz/sql";
 
 const db = engine.forTenant(tenantId(claims.tenant_id));
 
-// Every query through this handle — including a single execute() — runs in a
+// Every query through this handle (including a single execute()) runs in a
 // transaction that has already bound the tenant.
 const rows = await db.select("*").from("invoice").execute();
 ```
@@ -773,7 +773,7 @@ const rows = await db.select("*").from("invoice").execute();
 `TenantScopedSql` is branded and does not extend `Sql`, so typing a function
 parameter as `TenantScopedSql` makes the compiler reject an unscoped engine at
 the call site. Inside a tenant transaction, `SET`, `RESET`, `DISCARD` and
-`set_config` are rejected — the binding cannot be changed or outlive the
+`set_config` are rejected: the binding cannot be changed or outlive the
 transaction.
 
 Work that genuinely spans tenants goes through a separate, deliberately
@@ -785,9 +785,9 @@ await engine.unsafeCrossTenant("laporan konsolidasi", async (admin) =>
 );
 ```
 
-**Full guide:** [docs/multi-tenancy.md](../../docs/multi-tenancy.md) — policy SQL,
-the JWT-to-query path, double-entry posting, background jobs, cross-tenant
-reporting, and a checklist for every new table.
+**Full guide:** [docs/multi-tenancy.md](../../docs/multi-tenancy.md), covering
+policy SQL, the JWT-to-query path, double-entry posting, background jobs,
+cross-tenant reporting, and a checklist for every new table.
 
 ---
 
@@ -804,7 +804,7 @@ db.use(async (query, next) => {
   }
 });
 
-// Safety guard — block DELETE without WHERE
+// Safety guard: block DELETE without WHERE
 db.use(async (query, next) => {
   const sql = query.sql.trim().toLowerCase();
   if ((sql.startsWith("delete from") || sql.startsWith("update ")) && !sql.includes(" where ")) {
@@ -833,7 +833,7 @@ for await (const row of users.from(db).where({ active: true }).stream()) {
 }
 ```
 
-Supported by: SQLite (Bun) and PostgreSQL, both through a real cursor — memory
+Supported by: SQLite (Bun) and PostgreSQL, both through a real cursor: memory
 stays flat regardless of result size. On PostgreSQL the batch size is
 `streamBatchSize` (default 1000) rows per round trip. Breaking out of the loop
 early closes the cursor and releases the connection.
@@ -850,7 +850,7 @@ Supported by: SQLite (Bun), PostgreSQL.
 
 On PostgreSQL a named prepared statement is per-connection state, so the
 statement holds one dedicated pool connection for its lifetime and `DEALLOCATE`s
-it on `close()`. **Always close it** — until you do, that connection is checked
+it on `close()`. **Always close it**: until you do, that connection is checked
 out.
 
 ---
@@ -1056,7 +1056,7 @@ const db = pg.connect({ connectionString: process.env.DATABASE_URL });
 const accounts = pg.table("accounts", {
   id: pg.serial().primaryKey(),
   owner: pg.text().notNull(),
-  balance: pg.decimal(12, 2).default(0),   // typed as string — exact, no float64
+  balance: pg.decimal(12, 2).default(0),   // typed as string: exact, no float64
 });
 
 await db.migrate(accounts);

@@ -1,6 +1,6 @@
-<!-- docs: sync from coderbuzz/codex@b8d6f33 -->
+<!-- docs: sync from coderbuzz/codex@200be78 -->
 
-# @coderbuzz/sql — AI Expert Knowledge Reference
+# @coderbuzz/sql: AI Expert Knowledge Reference
 
 **Package:** `@coderbuzz/sql` v0.1.3\
 **Purpose:** Comprehensive reference for AI agents generating application code
@@ -54,7 +54,7 @@ import { snowflake } from "@coderbuzz/sql/snowflake";
 import { databricks } from "@coderbuzz/sql/databricks";
 ```
 
-### 2.2 Root package — shared helpers and types
+### 2.2 Root package: shared helpers and types
 
 ```ts
 import {
@@ -120,7 +120,7 @@ import * as databricksTypes from "@coderbuzz/sql/databricks-types";
 
 ## 3. Connecting to a Database
 
-Each dialect namespace has a `connect()` factory. Always call `connect()` — do
+Each dialect namespace has a `connect()` factory. Always call `connect()`. Do
 not instantiate engine classes directly unless needed for testing.
 
 ```ts
@@ -227,7 +227,7 @@ const users = pg.table("users", {
 | `.defaultNow()`   | DEFAULT NOW() in DDL                        |
 
 Legacy uppercase aliases: `.PRIMARY()`, `.NOT_NULL()`, `.ALLOW_NULL()`,
-`.INDEX()`, `.DEFAULT(v)` — still work, prefer camelCase in new code.
+`.INDEX()`, `.DEFAULT(v)` still work. Prefer camelCase in new code.
 
 ### ClickHouse Table Options (third arg)
 
@@ -306,7 +306,7 @@ for (const stmt of stmts) {
 DROP COLUMN (PG/MySQL/MSSQL), ALTER COLUMN (PG/MySQL/MSSQL). SQLite skips
 DROP/ALTER with a `console.warn`.
 
-**Renaming a column.** `diff()` cannot infer a rename — `memo` disappearing and
+**Renaming a column.** `diff()` cannot infer a rename: `memo` disappearing and
 `keterangan` appearing is indistinguishable from a genuine drop-and-add, and
 guessing means sometimes emitting `ALTER ... RENAME` for a column that should
 have been dropped, keeping data that was meant to go under a name that now means
@@ -333,7 +333,7 @@ modifiers (`.notNull()`, `.index()`, …).
 ### Pattern 1: Table-bound typed query
 
 ```ts
-// .from(engine) returns TypedSelectQuery — use .fields() for type-narrowing
+// .from(engine) returns TypedSelectQuery: use .fields() for type-narrowing
 const rows = await users.from(db)
   .fields("id", "email", "name") // typed: { id, email, name }[]
   .where({ active: true })
@@ -357,13 +357,13 @@ const rows = await db.select("u.id", "u.name", "p.title")
 ### Fields variants in .fields()
 
 ```ts
-// 1. Plain column name — type: InferRow<S>[col]
+// 1. Plain column name (type: InferRow<S>[col])
 .fields("id", "name")
 
-// 2. Column with alias — type: { userEmail: string }
+// 2. Column with alias (type: { userEmail: string })
 .fields(["email", "userEmail"])
 
-// 3. Computed expression — type: { upperName: string }
+// 3. Computed expression (type: { upperName: string })
 .fields(expr<string>("UPPER(name)", "upperName"))
 
 // 4. Aggregate helpers
@@ -372,7 +372,7 @@ const rows = await db.select("u.id", "u.name", "p.title")
 
 ### Joins
 
-**Untyped** — raw strings, validated by the identifier check:
+**Untyped**: raw strings, validated by the identifier check:
 
 ```ts
 db.select("u.id", "p.title")
@@ -380,10 +380,10 @@ db.select("u.id", "p.title")
   .left_join("posts p", "p.user_id = u.id") // LEFT JOIN
   .inner_join("tags t", "t.post_id = p.id") // INNER JOIN
   .right_join("authors a", "a.id = p.author"); // RIGHT JOIN
-// .full_join() — NOT supported by SQLite, MySQL, ClickHouse
+// .full_join(): NOT supported by SQLite, MySQL, ClickHouse
 ```
 
-**Typed** — from a `SqlTable`, stated as column pairs:
+**Typed**: from a `SqlTable`, stated as column pairs:
 
 ```ts
 journalLines.from(db)
@@ -399,8 +399,8 @@ type JoinOn<L, R> =
   | ReadonlyArray<{ left: keyof L & string; right: keyof R & string }>
 ```
 
-`left` is a column of the query so far — the base table or anything already
-joined — `right` a column of the table being joined. Both are checked against
+`left` is a column of the query so far (the base table or anything already
+joined), and `right` a column of the table being joined. Both are checked against
 their schemas: a typo is a compile error, and there is no string left for
 anything else to end up inside. An array of pairs joins them with `AND`.
 
@@ -415,7 +415,7 @@ anything else to end up inside. An array of pairs joins them with `AND`.
 
 `order_by()` and `group_by()` on a typed query accept columns of the base table
 **and** of everything joined; `order_by` also takes `[column, 'ASC' | 'DESC']`. A
-raw string still works — the validator still runs on it — so nothing existing
+raw string still works (the validator still runs on it), so nothing existing
 breaks.
 
 Why this exists: `SqlTable.from()` gave a typed query, but `TypedSelectQuery`
@@ -486,7 +486,7 @@ const { sql } = users.from(db).where({ id: 1 }).explain();
 
 ---
 
-## 8. WHERE Conditions — Complete Reference
+## 8. WHERE Conditions: Complete Reference
 
 ### Object form (parameterised)
 
@@ -504,7 +504,7 @@ const { sql } = users.from(db).where({ id: 1 }).explain();
 .where({ deleted_at: "IS NULL" })   // WHERE deleted_at IS NULL
 .where({ status: "IS NOT NULL" })   // WHERE status IS NOT NULL
 
-// Multiple fields — joined with AND
+// Multiple fields: joined with AND
 .where({ active: true, role: "admin" })
 // WHERE active = ? AND role = ?
 ```
@@ -577,12 +577,12 @@ const [row] = await users.insert(db)
   .returning("id", "email")
   .execute() as { id: number; email: string }[];
 
-// Upsert — do nothing on conflict
+// Upsert: do nothing on conflict
 await db.insert_into("users", {
   onConflict: { type: "do_nothing", columns: ["email"] },
 }).values([{ email: "a@b.com", name: "Alice" }]).execute();
 
-// Upsert — update on conflict
+// Upsert: update on conflict
 await db.insert_into("users", {
   onConflict: { type: "do_update", columns: ["email"], set: { name: "Alice Updated" } },
 }).values([{ email: "a@b.com", name: "Alice" }]).execute();
@@ -628,10 +628,10 @@ const batcher = db.batchInsert("events", {
   timeout: 2_000, // force flush after this many ms from first write
   maxInflight: 4, // concurrent flushes allowed before write() waits
   settings: { async_insert: "1" }, // engine-specific (ClickHouse)
-  onError: (err, rows) => { /* REQUIRED — retry or dead-letter these rows */ },
+  onError: (err, rows) => { /* REQUIRED: retry or dead-letter these rows */ },
 });
 
-// Write rows — write() returns a promise; awaiting it applies backpressure
+// Write rows: write() returns a promise; awaiting it applies backpressure
 await batcher.write({ id: 1, val: "a" });
 await batcher.write([{ id: 2, val: "b" }, { id: 3, val: "c" }]);
 
@@ -650,13 +650,13 @@ await batcher.close(); // flush + drain + seal (throws if write() called after)
 - `onError` is REQUIRED. The constructor throws without it. Rows leave the
   pending queue before the insert runs, so a failed auto-flush has no other way
   to be observed.
-- Always `await batcher.close()` at the end — never fire-and-forget.
+- Always `await batcher.close()` at the end: never fire-and-forget.
 - After `close()`, calling `write()` rejects.
-- Every row in a batch must have the SAME keys — a batched INSERT has one
+- Every row in a batch must have the SAME keys: a batched INSERT has one
   column list. A differing row rejects. Pass `heterogeneousRows: "union"` to
   insert the union of all columns with NULL for absent ones.
 - `await` each `write()` in a bulk import; that is what keeps memory flat.
-- Auto-flushes are fire-and-forget internally but tracked — `drain()` waits for
+- Auto-flushes are fire-and-forget internally but tracked: `drain()` waits for
   them.
 
 ---
@@ -691,14 +691,14 @@ await db.delete_from("users")
   .where(lt("created_at", new Date("2024-01-01")))
   .execute();
 
-// WITHOUT .where() deletes ALL rows — guard with middleware
+// WITHOUT .where() deletes ALL rows: guard with middleware
 ```
 
 ---
 
 ## 13. Raw SQL (Tagged Template)
 
-Values are **always** bound parameters — never inlined into SQL text.
+Values are **always** bound parameters: never inlined into SQL text.
 
 ```ts
 const email = "ada@example.com";
@@ -732,7 +732,7 @@ Placeholder styles per dialect:
 ## 14. Transactions
 
 `transaction()` holds ONE connection for the whole callback. Use `tx` for every
-statement inside — `db` is a pool and would run the statement on a different
+statement inside: `db` is a pool and would run the statement on a different
 connection, outside the transaction.
 
 ```ts
@@ -756,7 +756,7 @@ await db.transaction(fn, {
 });
 ```
 
-`setup` is where `SET LOCAL` belongs — it is the mechanism PostgreSQL
+`setup` is where `SET LOCAL` belongs: it is the mechanism PostgreSQL
 row-level security depends on, and it is correct only inside a
 single-connection transaction.
 
@@ -787,14 +787,14 @@ PostgreSQL / MySQL / Oracle only. SQLite, MSSQL and ClickHouse throw.
 
 If the callback fails AND the `ROLLBACK` also fails, a
 `TransactionRollbackError` is thrown carrying both `cause` and `rollbackError`.
-The transaction's outcome is undetermined — reconcile, do not just retry.
+The transaction's outcome is undetermined: reconcile, do not just retry.
 
 ---
 
 ## 15. Middleware
 
 ```ts
-// Register in order — each calls next() to pass through
+// Register in order: each calls next() to pass through
 db.use(async (query, next) => {
   console.log("[sql]", query.sql, query.params);
   return next();
@@ -853,7 +853,7 @@ max<number>("score", "topScore"); // MAX(score) AS topScore
 
 > **TypeScript type of exact numerics.** `decimal(p,s)`, `numeric(p,s)`,
 > `bigint()`, `bigserial()` and MSSQL `money()` infer as **`string`**, not
-> `number` — float64 cannot represent them exactly, and `pg`/`mysql2` return
+> `number`: float64 cannot represent them exactly, and `pg`/`mysql2` return
 > them as strings anyway. `integer`, `smallint`, `int`, `serial`, `float`,
 > `real` and `doublePrecision` remain `number`.
 
@@ -1016,9 +1016,9 @@ const result: ClickHouseDataset = await db.select(
   .group_by("tenant_id")
   .execute();
 
-result.data; // Record<string, unknown>[]  — actual rows
-result.meta; // { name: string; type: string }[]  — column metadata
-result.rows; // number  — row count
+result.data; // Record<string, unknown>[]  : actual rows
+result.meta; // { name: string; type: string }[]  : column metadata
+result.rows; // number  : row count
 result.statistics?.read_rows; // optional stats
 ```
 
@@ -1045,30 +1045,30 @@ result.statistics?.read_rows; // optional stats
 **DO NOT** construct queries by string concatenation:
 
 ```ts
-// WRONG — SQL injection risk
+// WRONG: SQL injection risk
 const rows = await db.execute(`SELECT * FROM users WHERE name = '${name}'`);
 
-// CORRECT — use parameterised query or tagged template
+// CORRECT: use parameterised query or tagged template
 const rows = await db.sql`SELECT * FROM users WHERE name = ${name}`.execute();
 ```
 
 **DO NOT** call `.stream()` or `.prepare()` on MySQL, MSSQL, Oracle, Snowflake,
-Databricks, or ClickHouse engines — they throw.
+Databricks, or ClickHouse engines: they throw.
 
 **DO NOT** use `.returning()` on MySQL, MSSQL, Oracle, Snowflake, Databricks, or
-ClickHouse — throws `"RETURNING is not supported by this dialect"`.
+ClickHouse: throws `"RETURNING is not supported by this dialect"`.
 
-**DO NOT** use `.full_join()` with SQLite, MySQL, or ClickHouse — throws at
+**DO NOT** use `.full_join()` with SQLite, MySQL, or ClickHouse: throws at
 compile time.
 
-**DO NOT** call `batcher.write()` after `batcher.close()` — rejects.
+**DO NOT** call `batcher.write()` after `batcher.close()`: rejects.
 
-**DO NOT** forget `await batcher.close()` — rows may be left unwritten.
+**DO NOT** forget `await batcher.close()`: rows may be left unwritten.
 
 **DO NOT** use the pooled engine inside a transaction callback. Use `tx`:
 
 ```ts
-// WRONG — this INSERT runs on a different connection, outside the transaction
+// WRONG: this INSERT runs on a different connection, outside the transaction
 await db.transaction(async (tx) => { await db.execute(insertSql); });
 
 // CORRECT
@@ -1078,7 +1078,7 @@ await db.transaction(async (tx) => { await tx.execute(insertSql); });
 **DO NOT** pass user input to `.order_by()`, `.group_by()`, `.select()`,
 `.from()`, or a join `ON` condition. These cannot be bound parameters, so they
 are interpolated. They are validated and will throw `UnsafeIdentifierError` on
-anything dangerous, but that is a guard, not a licence — map a sort parameter
+anything dangerous, but that is a guard, not a licence: map a sort parameter
 through a fixed allow-list of column names:
 
 ```ts
@@ -1095,16 +1095,16 @@ They are typed `string` because float64 cannot hold them exactly. `Number(x)`
 on a money column loses cents:
 
 ```ts
-// WRONG — reintroduces the precision loss the string type exists to prevent
+// WRONG: reintroduces the precision loss the string type exists to prevent
 const total = rows.reduce((a, r) => a + Number(r.debit), 0);
 
-// CORRECT — sum in SQL, or use a decimal library
+// CORRECT: sum in SQL, or use a decimal library
 const [{ total }] = await db.sql`SELECT SUM(debit)::text AS total FROM jurnal`.execute();
 ```
 
 **DO validate incoming amounts with `decimal()` from `@coderbuzz/veta`**, not
 `number()`. It takes and returns the same normalized string this package uses,
-so there is no conversion at the HTTP boundary — and conversions are where
+so there is no conversion at the HTTP boundary, and conversions are where
 precision goes:
 
 ```ts
@@ -1121,7 +1121,7 @@ const postJournal = object({
 **DO NOT** use `DELETE` or `UPDATE` without `.where()` unless you intend to
 affect all rows. Add a middleware guard in production code.
 
-**DO NOT** use `.unique()` on ClickHouse table columns — throws.
+**DO NOT** use `.unique()` on ClickHouse table columns: throws.
 
 ---
 
@@ -1149,7 +1149,7 @@ await users.insert(db).values([{
   active: true,
 }]).execute();
 
-// Read — typed result
+// Read: typed result
 const all = await users.from(db).fields("id", "name").where({ active: true })
   .execute();
 
@@ -1270,7 +1270,7 @@ Version: 0.1.3
 License: MIT
 Type:    ESM only (type: "module")
 Peer deps (all optional): pg, mysql2, mssql, better-sqlite3, @db/sqlite, oracledb, snowflake-sdk, @databricks/sql
-Runtime dep: @coderbuzz/veta (internal — schema coercion)
+Runtime dep: @coderbuzz/veta (internal, schema coercion)
 ```
 
 **Export map summary:**
