@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@200be78 -->
+<!-- docs: sync from coderbuzz/codex@60ca8c4 -->
 
 # @coderbuzz/sql
 
@@ -64,6 +64,8 @@ This is not an ORM. There are no lazy-loaded relations, no magical `save()` meth
 - **CTE, JOIN, UNION, subqueries**: full SQL composition
 - **Expression helpers**: `eq`, `and`, `or`, `inList`, `isNull`, `like`, `ilike`, `raw`, etc.
 - **Aggregate helpers**: `count`, `sum`, `avg`, `min`, `max`
+- **Exact decimal arithmetic**: `@coderbuzz/sql/decimal`, a `BigInt`-backed add/subtract/multiply/divide with rounding modes and an `allocate()` that never loses a cent, all with no dependency
+- **Zero-driver PostgreSQL on Bun**: `@coderbuzz/sql/postgres-bun` runs on Bun's built-in `Bun.SQL`
 - **Infer types**: `InferRow<S>`, `InferSelect<S, F>` for subset field selection
 - **Runtime agnostic**: Bun, Node.js, Deno
 
@@ -107,6 +109,8 @@ bun add @databricks/sql      # Databricks
 
 SQLite on Bun uses `bun:sqlite` (built-in, no driver needed).
 SQLite on Deno uses `@db/sqlite`.
+PostgreSQL on Bun can skip `pg` entirely: import `@coderbuzz/sql/postgres-bun`,
+which uses Bun's built-in SQL client.
 
 ---
 
@@ -116,6 +120,7 @@ SQLite on Deno uses `@db/sqlite`.
 |---|---|---|---|
 | SQLite | `@coderbuzz/sql/sqlite` | `sqlite` | `bun:sqlite`, `better-sqlite3`, `node:sqlite`, `@db/sqlite` |
 | PostgreSQL | `@coderbuzz/sql/postgres` | `pg` | `pg` |
+| PostgreSQL on Bun | `@coderbuzz/sql/postgres-bun` | `pg` | Bun built-in (`Bun.SQL`), no driver to install |
 | MySQL / MariaDB | `@coderbuzz/sql/mysql` | `mysql` | `mysql2` |
 | SQL Server | `@coderbuzz/sql/mssql` | `mssql` | `mssql` |
 | ClickHouse | `@coderbuzz/sql/clickhouse` | `ch` | Native `fetch` HTTP |
@@ -618,7 +623,8 @@ cent. This is also what the drivers already do: `pg` and `mysql2` return these
 columns as strings for exactly this reason, so the declared type now matches
 the value you actually receive.
 
-Do the arithmetic where it is exact:
+Do the arithmetic where it is exact: in SQL, or with the decimal helpers this
+package ships.
 
 ```ts
 // In the database
@@ -626,13 +632,52 @@ const [{ total }] = await db.execute(
   db.sql`SELECT SUM(debit)::text AS total FROM jurnal WHERE jurnal_id = ${id}`.toSQL(),
 );
 
-// Or in a decimal library
-import Decimal from "decimal.js";
-const balanced = new Decimal(totalDebit).equals(totalKredit);
+// Or in JavaScript, on the same strings, with no dependency
+import { sumDecimals, multiply, add, roundDecimal, allocate } from "@coderbuzz/sql/decimal";
+
+const gross = multiply(row.price, row.qty);            // exact, scale grows
+const tax   = multiply(gross, "0.11", { scale: 2 });   // rounds where you say so
+const total = add(gross, tax);
+
+sumDecimals(debits) === sumDecimals(credits);          // exact, order-independent
 ```
+
+### Exact arithmetic without a dependency
+
+`@coderbuzz/sql/decimal` does the arithmetic on the decimal strings themselves,
+through `BigInt`. There is no `decimal.js`, no `big.js`, and no float64 in the
+path. A value parses to a scaled integer (`'12.34'` becomes `1234n` at scale 2)
+and renders back to a string.
+
+```ts
+add("0.1", "0.2");                                  // '0.3'      (0.1 + 0.2 is not)
+multiply("19.99", "7");                             // '139.93'
+divide("10.00", "3", { scale: 2 });                 // '3.33'     (scale is required)
+roundDecimal("2.345", 2, "half-even");              // '2.34'     (banker's rounding)
+sumDecimals(["0.1", "0.2", "0.3"]);                 // '0.6'
+compareDecimals("2.00", "10.00");                   // -1         (not string order)
+toMinorUnits("1234.56", 2);                         // 123456n
+allocate("100.00", ["1", "1", "1"], { scale: 2 });  // ['33.34', '33.33', '33.33']
+```
+
+`allocate()` is the one to know: splitting `100.00` three ways and rounding each
+part loses a cent, and a ledger notices. It hands the leftover minor units to
+the parts with the largest discarded fraction, so the parts always add back up
+to the total. Use it for tax across lines, a discount across a basket, freight
+across items, or an instalment plan.
+
+Rounding is never implicit where it would change a value: `add`, `subtract` and
+`multiply` return the exact result and grow the scale, `divide` requires a
+`scale`, and every rounding mode (`half-up` default, `half-even`, `half-down`,
+`up`, `down`, `ceil`, `floor`) is named at the call site.
 
 `INTEGER`, `SMALLINT`, `SERIAL`, `FLOAT`, `REAL` and `DOUBLE PRECISION` are
 still `number`: their ranges fit, or they are approximate by nature.
+
+> PostgreSQL's own `money` type is deliberately not offered as a column
+> factory. The server renders it with a currency symbol and thousands
+> separators (`'$1,234.56'`) under every driver, so it is not a decimal string
+> and cannot be summed as one. Use `numeric(p, s)`.
 
 > Row values are parsed only on the typed path (`table.from(db).execute()`),
 > which knows the schema. `db.execute(sql)` returns rows exactly as the driver
@@ -890,8 +935,33 @@ WAL mode enabled automatically for file-based databases.
 ### PostgreSQL
 
 ```ts
+// Through the `pg` package: runs on Bun, Node.js and Deno
+import { pg } from "@coderbuzz/sql/postgres";
 const db = pg.connect({ connectionString: process.env.DATABASE_URL, max: 10 });
 ```
+
+### PostgreSQL on Bun (no driver)
+
+```ts
+// Through Bun's built-in SQL client: nothing to install
+import { pg } from "@coderbuzz/sql/postgres-bun";
+const db = pg.connect({ connectionString: process.env.DATABASE_URL, max: 10 });
+```
+
+Same namespace, same engine methods, same guarantees: transactions on one
+reserved connection, savepoints, isolation levels, tenant scoping with
+row-level security, cursor streaming, advisory locks. The import path is the
+only difference, so moving off `pg` is a one-line change.
+
+Bun's driver returns `NUMERIC`, `DECIMAL` and `BIGINT` as strings, exactly as
+`pg` does. That is verified against a live PostgreSQL in the test suite, down to
+`'12345678901234567.89'` surviving a round trip unchanged.
+
+Bun-specific options: `bigint: true` (return `int8` as a JS `bigint`),
+`prepare: false` (required behind PgBouncer in transaction mode), `idleTimeout`,
+`connectionTimeout`, `maxLifetime`, `tls`, `sslMode`. The underlying client is
+reachable as `db.client` for the parts Bun offers and this engine does not wrap,
+such as `LISTEN`/`NOTIFY`.
 
 ### MySQL
 

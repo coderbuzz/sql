@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@200be78 -->
+<!-- docs: sync from coderbuzz/codex@60ca8c4 -->
 
 # @coderbuzz/sql: AI Expert Knowledge Reference
 
@@ -45,7 +45,8 @@ SqlTable<S>
 
 ```ts
 import { sqlite } from "@coderbuzz/sql/sqlite";
-import { pg } from "@coderbuzz/sql/postgres";
+import { pg } from "@coderbuzz/sql/postgres";       // driver: `pg` package
+import { pg as pgBun } from "@coderbuzz/sql/postgres-bun"; // driver: Bun built-in, none to install
 import { mysql } from "@coderbuzz/sql/mysql";
 import { mssql } from "@coderbuzz/sql/mssql";
 import { ch } from "@coderbuzz/sql/clickhouse";
@@ -100,7 +101,40 @@ import {
   sum,
   UpdateQuery,
   type WhereClause,
+  // Exact decimal arithmetic (also at @coderbuzz/sql/decimal)
+  add,
+  subtract,
+  multiply,
+  divide,
+  negate,
+  absDecimal,
+  sumDecimals,
+  roundDecimal,
+  normalizeDecimal,
+  compareDecimals,
+  equalsDecimal,
+  lessThanDecimal,
+  greaterThanDecimal,
+  isZeroDecimal,
+  isNegativeDecimal,
+  maxDecimal,
+  minDecimal,
+  isDecimalString,
+  toMinorUnits,
+  fromMinorUnits,
+  allocate,
+  splitEvenly,
+  DecimalError,
+  type DecimalInput,
+  type RoundingMode,
+  type DecimalOpOptions,
 } from "@coderbuzz/sql";
+```
+
+### 2.2b Decimal subpath (no engine, no dialect)
+
+```ts
+import { add, multiply, roundDecimal, allocate } from "@coderbuzz/sql/decimal";
 ```
 
 ### 2.3 Type-only subpaths (column factories without engine)
@@ -138,6 +172,27 @@ const db = pg.connect({
   user: "app",
   password: "secret",
   max: 10,
+});
+
+// PostgreSQL on Bun: same namespace shape, no driver package
+import { pg as pgBun } from "@coderbuzz/sql/postgres-bun";
+const db = pgBun.connect({ connectionString: process.env.DATABASE_URL, max: 10 });
+const db = pgBun.connect({
+  host: "localhost",
+  port: 5432,
+  database: "app",
+  user: "app",
+  password: "secret",
+  max: 10,
+  // Bun-specific, all optional:
+  bigint: false,          // true → int8 arrives as a JS bigint instead of a string
+  prepare: true,          // false → required behind PgBouncer in transaction mode
+  idleTimeout: 30,        // seconds
+  connectionTimeout: 30,  // seconds
+  maxLifetime: 0,         // seconds; 0 = unlimited
+  sslMode: "prefer",      // 'disable' | 'prefer' | 'require' | 'verify-ca' | 'verify-full'
+  streamBatchSize: 1000,  // rows per round trip in stream()
+  tenantSetting: "app.tenant_id",
 });
 
 // MySQL
@@ -1098,8 +1153,12 @@ on a money column loses cents:
 // WRONG: reintroduces the precision loss the string type exists to prevent
 const total = rows.reduce((a, r) => a + Number(r.debit), 0);
 
-// CORRECT: sum in SQL, or use a decimal library
+// CORRECT: sum in SQL...
 const [{ total }] = await db.sql`SELECT SUM(debit)::text AS total FROM jurnal`.execute();
+
+// ...or with the exact helpers this package ships (BigInt, no dependency)
+import { sumDecimals } from "@coderbuzz/sql/decimal";
+const total = sumDecimals(rows.map(r => r.debit));
 ```
 
 **DO validate incoming amounts with `decimal()` from `@coderbuzz/veta`**, not
@@ -1125,7 +1184,212 @@ affect all rows. Add a middleware guard in production code.
 
 ---
 
-## 25. Quick Code Patterns
+## 25. Exact Decimal Arithmetic (`@coderbuzz/sql/decimal`)
+
+Every function takes and returns **decimal strings**, the same representation
+`NUMERIC`/`DECIMAL`/`BIGINT` columns produce and `decimal()` from
+`@coderbuzz/veta` validates. Internally each value parses to a scaled `BigInt`
+(`'12.34'` → `1234n` at scale 2), so no float64 is ever involved. Zero
+dependencies: there is no `decimal.js` or `big.js` under this.
+
+### Input types
+
+```ts
+type DecimalInput = string | bigint | number;
+```
+
+- `string`: the normal case. Must match `/^-?\d+(\.\d+)?$/`. No exponents, no
+  thousands separators, no currency symbols, at least one integer digit
+  (`'.5'` and `'1.'` are rejected).
+- `bigint`: accepted at scale 0.
+- `number`: accepted **only** when `Number.isSafeInteger(n)`. `12.34` throws;
+  it has already lost precision before the call.
+
+Anything else throws `DecimalError`.
+
+### Rounding modes
+
+```ts
+type RoundingMode =
+  | "half-up"    // default; ties away from zero: 0.125 → 0.13, -0.125 → -0.13
+  | "half-even"  // banker's; ties to even: 0.125 → 0.12, 0.135 → 0.14
+  | "half-down"  // ties toward zero
+  | "up"         // always away from zero
+  | "down"       // always toward zero (truncate)
+  | "ceil"       // toward +Infinity
+  | "floor";     // toward -Infinity
+```
+
+### Full signatures
+
+| Function | Signature | Result scale |
+| --- | --- | --- |
+| `add` | `(a: DecimalInput, b: DecimalInput, options?: DecimalOpOptions) => string` | `max(scaleA, scaleB)` |
+| `subtract` | `(a, b, options?) => string` | `max(scaleA, scaleB)` |
+| `multiply` | `(a, b, options?) => string` | `scaleA + scaleB` (exact product) |
+| `divide` | `(a, b, options: DecimalOpOptions & { scale: number }) => string` | `options.scale` (required) |
+| `negate` | `(value: DecimalInput) => string` | unchanged |
+| `absDecimal` | `(value: DecimalInput) => string` | unchanged |
+| `sumDecimals` | `(values: readonly DecimalInput[], options?) => string` | largest input scale; `'0'` for `[]` |
+| `roundDecimal` | `(value, scale: number, rounding?: RoundingMode) => string` | `scale` |
+| `normalizeDecimal` | `(value, scale?: number, rounding?: RoundingMode) => string` | `scale`, or unchanged |
+| `compareDecimals` | `(a, b) => -1 \| 0 \| 1` | n/a |
+| `equalsDecimal` | `(a, b) => boolean` | n/a |
+| `lessThanDecimal` | `(a, b) => boolean` | n/a |
+| `greaterThanDecimal` | `(a, b) => boolean` | n/a |
+| `isZeroDecimal` | `(value) => boolean` | n/a |
+| `isNegativeDecimal` | `(value) => boolean` | `'-0.00'` is **not** negative |
+| `maxDecimal` / `minDecimal` | `(a, b) => string` | n/a |
+| `isDecimalString` | `(value: unknown) => value is string` | n/a |
+| `toMinorUnits` | `(value, scale: number, rounding?: RoundingMode) => bigint` | n/a |
+| `fromMinorUnits` | `(units: bigint \| number, scale: number) => string` | `scale` |
+| `allocate` | `(total, weights: readonly DecimalInput[], options: { scale: number }) => string[]` | `scale` |
+| `splitEvenly` | `(total, parts: number, options: { scale: number }) => string[]` | `scale` |
+
+```ts
+type DecimalOpOptions = {
+  scale?: number;              // 0..100; omitted = keep the exact scale
+  rounding?: RoundingMode;     // default 'half-up'
+};
+```
+
+### Behavioural notes
+
+- **Nothing rounds implicitly.** `add`, `subtract` and `multiply` return the
+  exact result and let the scale grow; pass `{ scale }` to round. `divide`
+  requires `scale` because no default is honest.
+- **Normalisation is canonical.** Leading zeros are dropped, `-0` becomes `0`,
+  and `{ scale }` pads with zeros. Two equal amounts are therefore equal
+  strings, usable as map keys and with `===`.
+- **Comparison is by value, not by string order.** `compareDecimals('2.00',
+  '10.00')` is `-1`; `'2.00' < '10.00'` as strings is `false`.
+- **`sumDecimals` is order-independent**, which is what makes a
+  `debit === credit` check meaningful.
+- **`toMinorUnits` refuses to lose a digit** unless a rounding mode is passed:
+  `toMinorUnits('1234.565', 2)` throws, `toMinorUnits('1234.565', 2, 'half-up')`
+  is `123457n`. Trailing zeros do not count as a lost digit.
+- **`allocate` always sums to the total.** It floors each share, then hands out
+  the leftover minor units to the largest discarded fractions, ties to the
+  earlier index (so it is deterministic). Negative totals allocate their
+  magnitude and carry the sign. Weights must be non-negative and must not all
+  be zero; an empty weight list throws.
+- **`splitEvenly(total, n, { scale })`** is `allocate` with equal weights: the
+  earliest parts absorb the odd minor units, the instalment convention.
+- **Errors** are always `DecimalError`, never a silent `NaN`. Division by zero
+  throws rather than returning `Infinity`.
+
+### Worked ERP line
+
+```ts
+import { multiply, subtract, add, allocate, sumDecimals } from "@coderbuzz/sql/decimal";
+
+const gross    = multiply(row.price, row.qty);              // '139.93' exactly
+const discount = multiply(gross, "0.15", { scale: 2 });     // 20.9895 → '20.99'
+const net      = subtract(gross, discount);                 // '118.94'
+const tax      = multiply(net, "0.11", { scale: 2 });       // 13.0834 → '13.08'
+const total    = add(net, tax);                             // '132.02'
+
+const perCentre = allocate(tax, ["1", "1", "1"], { scale: 2 });
+sumDecimals(perCentre) === tax;                             // true, always
+```
+
+---
+
+## 26. PostgreSQL on Bun (`@coderbuzz/sql/postgres-bun`)
+
+`BunPostgresEngine` drives PostgreSQL through Bun's built-in SQL client
+(`Bun.SQL`, Bun 1.2+; the suite is run on Bun 1.3 and 1.4). No peer dependency:
+the protocol is in the runtime.
+Everything `PostgresEngine` does, this does, with the same semantics. Only the
+import path differs.
+
+```ts
+import { pg } from "@coderbuzz/sql/postgres-bun";
+const db = pg.connect({ connectionString: process.env.DATABASE_URL, max: 10 });
+```
+
+On a runtime without `Bun.SQL` the constructor throws with a message pointing at
+`@coderbuzz/sql/postgres`; it does not fail at import time.
+
+### Parity with the `pg` engine
+
+| Capability | `@coderbuzz/sql/postgres` | `@coderbuzz/sql/postgres-bun` |
+| --- | --- | --- |
+| `transaction(fn, { isolation, readOnly, setup })` | one pooled client | one reserved connection |
+| `tx.savepoint()` | yes | yes |
+| `forTenant(tenantId)` + RLS binding lock | yes | yes |
+| `unsafeCrossTenant(reason, fn)` | yes (separate BYPASSRLS pool) | yes (separate BYPASSRLS client) |
+| `stream()` | `DECLARE CURSOR` + `FETCH FORWARD` | same |
+| `prepare()` | named statement + `DEALLOCATE` | statement cached on a held connection |
+| `withAdvisoryLock(key, fn, wait?)` | yes | yes |
+| Middleware sees `BEGIN`/`COMMIT`/`ROLLBACK` | yes | yes |
+| Connection destroyed after a failed `ROLLBACK` | `release(true)` | `connection.close()` |
+| Driver | `pg` peer dependency | none |
+
+### Config (`BunPostgresConfig`)
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `connectionString` | none | `postgres://user:pass@host:port/db`; an explicit `user`/`password` overrides the credentials inside it (this is what lets `unsafeCrossTenant` swap in the BYPASSRLS role) |
+| `host` / `port` / `database` / `user` / `password` | `localhost` / `5432` / none / none / none | connection parts |
+| `max` | `10` | pool size |
+| `idleTimeout` | driver default | seconds a pooled connection may idle |
+| `connectionTimeout` | driver default | seconds to wait for a connection |
+| `maxLifetime` | driver default | seconds before a connection is recycled |
+| `bigint` | `false` | `true` → `int8` arrives as a JS `bigint` |
+| `prepare` | `true` | `false` for PgBouncer in transaction mode |
+| `tls` / `sslMode` | none | passed through to `Bun.SQL` |
+| `streamBatchSize` | `1000` | rows per `FETCH FORWARD` in `stream()` |
+| `tenantSetting` | `'app.tenant_id'` | run-time parameter RLS policies read |
+| `crossTenant` | none | `{ user, password, max? }` for a `BYPASSRLS` role |
+| `onCrossTenantAccess` | none | called with the reason on every `unsafeCrossTenant()` |
+
+### Type mapping (verified against PostgreSQL 16 via Bun)
+
+| PostgreSQL type | JS value from the driver | Column factory | Declared TS type |
+| --- | --- | --- | --- |
+| `numeric` / `decimal` | `string` (exact, any precision) | `pg.numeric(p,s)` / `pg.decimal(p,s)` | `string` |
+| `bigint` / `int8` | `string`, or `bigint` with `{ bigint: true }` | `pg.bigint()` | `string` |
+| `bigserial` | `string` | `pg.bigserial()` | `string` |
+| `count(*)`, any `int8` aggregate | `string` | n/a | n/a |
+| `integer` / `smallint` / `serial` | `number` | `pg.integer()` … | `number` |
+| `double precision` / `real` | `number` | `pg.doublePrecision()` | `number` |
+| `boolean` | `boolean` | `pg.boolean()` | `boolean` |
+| `timestamptz` / `timestamp` / `date` | `Date` | `pg.timestamptz()` … | `Date` |
+| `json` / `jsonb` | parsed object | `pg.jsonb()` | `object` |
+| `bytea` | `Buffer` | `pg.bytea()` | n/a |
+| `uuid` / `text` / `varchar` | `string` | `pg.uuid()` … | `string` |
+| `money` | `string`, **locale-formatted** (`'$1,234.56'`) | none offered | n/a |
+
+Gotchas that follow from the table:
+
+- `count(*)` is `int8`, so `rows[0].n` is `'41'`, not `41`. Cast in SQL
+  (`count(*)::int`) or read it as a decimal string.
+- `money` is not a decimal string under any driver. Use `numeric(p, s)`.
+- Binding a JS `number` to a `numeric` column silently goes through float64:
+  `${0.1 + 0.2}` lands as `0.30`. Bind the string.
+- `{ bigint: true }` changes what the driver returns, not what a column
+  promises: the typed path still yields `string` for `bigint()` columns.
+
+### Methods beyond the shared `Sql` surface
+
+```ts
+db.tenantSetting;                                  // string
+db.client;                                         // the raw Bun.SQL object (LISTEN/NOTIFY, file(), beginDistributed)
+db.forTenant(tenantId(id));                        // TenantScopedSql
+db.unsafeCrossTenant(reason, async admin => ...);  // needs config.crossTenant
+db.withAdvisoryLock(key, fn, wait?);               // Promise<R | undefined>
+db.stream(compiledQuery);                          // AsyncIterable<row>
+db.prepare(compiledQuery);                         // { execute(params?), close() }
+await db.close();                                  // closes both clients
+```
+
+`db.client` bypasses middleware and is not part of any transaction the engine
+opened. Use it for Bun features this engine does not wrap, not for queries.
+
+---
+
+## 27. Quick Code Patterns
 
 ### Full CRUD (SQLite)
 
@@ -1262,7 +1526,7 @@ const rows = await db
 
 ---
 
-## 26. Package Metadata
+## 28. Package Metadata
 
 ```
 Package: @coderbuzz/sql
@@ -1280,6 +1544,8 @@ Runtime dep: @coderbuzz/veta (internal, schema coercion)
 | `@coderbuzz/sql`                  | Core classes, helpers, ANSI types   |
 | `@coderbuzz/sql/sqlite`           | `sqlite` namespace + `SQLiteEngine` |
 | `@coderbuzz/sql/postgres`         | `pg` namespace + `PostgresEngine`   |
+| `@coderbuzz/sql/postgres-bun`     | `pg` namespace + `BunPostgresEngine` |
+| `@coderbuzz/sql/decimal`          | Exact decimal arithmetic helpers    |
 | `@coderbuzz/sql/mysql`            | `mysql` namespace + `MySQLEngine`   |
 | `@coderbuzz/sql/mssql`            | `mssql` namespace + `MSSQLEngine`   |
 | `@coderbuzz/sql/clickhouse`       | `ch` namespace + `ClickHouseEngine` |
