@@ -1,8 +1,8 @@
-<!-- docs: sync from coderbuzz/codex@9a7a8a5 -->
+<!-- docs: sync from coderbuzz/codex@b37bd48 -->
 
 # @coderbuzz/sql: AI Expert Knowledge Reference
 
-**Package:** `@coderbuzz/sql` v0.1.3\
+**Package:** `@coderbuzz/sql` v0.8.1\
 **Purpose:** Comprehensive reference for AI agents generating application code
 with the `@coderbuzz/sql` library.\
 **Distribution:** ESM only (`dist/` folder). No source `.ts` files in the
@@ -53,11 +53,14 @@ import { mssql } from "@coderbuzz/sql/mssql";
 import { ch } from "@coderbuzz/sql/clickhouse";
 ```
 
+`@coderbuzz/sql/sqlite` resolves by export condition: `bun` → `bun:sqlite`,
+`deno` → `@db/sqlite`, `default` (Node.js) → `better-sqlite3`, falling back to
+the built-in `node:sqlite` (Node 22+) when `better-sqlite3` is not installed.
+
 ### 2.2 Root package: shared helpers and types
 
 ```ts
 import {
-  and,
   avg,
   type BatchOptions,
   // Types
@@ -65,32 +68,17 @@ import {
   // Aggregate helpers
   count,
   DeleteQuery,
-  // Expression helpers (also in each dialect namespace)
-  eq,
   // Expression factory
   expr,
-  gt,
-  gte,
-  ilike,
   type InferRow,
   type InferSelect,
-  inList,
   InsertBatcher,
   type InsertOptions,
   InsertQuery,
-  isNotNull,
-  isNull,
-  like,
-  lt,
-  lte,
   max,
   type Middleware,
   min,
-  ne,
-  not,
   type OnConflictClause,
-  or,
-  raw,
   SelectQuery,
   // Classes (for advanced use)
   Sql,
@@ -128,6 +116,11 @@ import {
   type DecimalOpOptions,
 } from "@coderbuzz/sql";
 ```
+
+The expression helpers (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`,
+`inList`, `isNull`, `isNotNull`, `and`, `or`, `not`, `raw`) are **not**
+exported from the root package. Use them from a dialect namespace:
+`pg.eq(...)`, `sqlite.and(...)`, and so on.
 
 ### 2.2b Decimal subpath (no engine, no dialect)
 
@@ -315,18 +308,37 @@ await db.execute(users.dropTable()); // "DROP TABLE IF EXISTS users;"
 import { introspect } from "@coderbuzz/sql/dist/migration/introspect";
 import { diff } from "@coderbuzz/sql/dist/migration/diff";
 import { applyDiff } from "@coderbuzz/sql/dist/migration/apply";
-import { sqliteCompiler } from "@coderbuzz/sql/dist/dialects/sqlite";
 
 const live = await introspect(db); // query live schema
 const diffs = diff(live, [usersV2.toAst()]); // compute diffs
-const stmts = applyDiff(diffs, sqliteCompiler); // ALTER TABLE statements
+const stmts = applyDiff(diffs, db); // ALTER TABLE statements; a compiler also works
 
 for (const stmt of stmts) {
   await db.execute(stmt);
 }
 ```
 
-`applyDiff()` supports: RENAME COLUMN (all dialects), ADD COLUMN (all dialects),
+> **Not importable yet.** `introspect`, `diff` and `applyDiff` live in
+> `src/migration/` but are not a tsup entry and not in the `exports` map, so
+> the `@coderbuzz/sql/dist/migration/*` paths above do not resolve in the
+> published package. Do not generate code that imports them until a
+> `./migration` subpath exists.
+
+Signatures: `introspect(db: Sql<any>): Promise<CreateTableNode[]>` (SQLite,
+PostgreSQL, MySQL, MSSQL), `diff(live, target): TableDiff[]`,
+`applyDiff(diffs, target: BaseCompiler | engine, options?: { allowDestructive?: boolean }): string[]`.
+`DROP COLUMN` is omitted (with a `console.warn`) unless
+`{ allowDestructive: true }` is passed.
+
+On PostgreSQL, run the statements inside `db.transaction()` (DDL is
+transactional, so a failure leaves the schema untouched) and wrap the whole
+thing in `db.withAdvisoryLock(key, fn)` so two instances of a rolling deploy
+do not migrate at once. The version ledger and file loading belong in the
+application.
+
+`applyDiff()` supports: RENAME COLUMN (emitted for all dialects as
+`ALTER TABLE ... RENAME COLUMN`, which SQL Server rejects: it needs
+`sp_rename`), ADD COLUMN (all dialects),
 DROP COLUMN (PG/MySQL/MSSQL), ALTER COLUMN (PG/MySQL/MSSQL). SQLite skips
 DROP/ALTER with a `console.warn`.
 
@@ -493,7 +505,7 @@ const { sql, params } = users.from(db)
   .fields("id", "email")
   .where({ active: true })
   .toSQL();
-// sql: 'SELECT "id", "email" FROM users WHERE active = ?'
+// sql: 'SELECT id, email FROM users WHERE "active" = ?;'
 // params: [true]
 ```
 
@@ -504,9 +516,13 @@ const { sql, params } = users.from(db)
 const plan = await users.from(db).where({ id: 1 }).explain().execute();
 const { sql } = users.from(db).where({ id: 1 }).explain();
 // SQLite: "EXPLAIN QUERY PLAN ..."
-// PostgreSQL: "EXPLAIN ANALYZE ..."
+// PostgreSQL: "EXPLAIN ANALYZE ..."  (ANALYZE runs the query for real)
 // Others: "EXPLAIN ..."
 ```
+
+`explain_analyze()` returns a plain `CompiledQuery` (not executable) with a
+literal `EXPLAIN ANALYZE` prefix on every dialect, which SQLite does not
+accept.
 
 ---
 
@@ -555,12 +571,13 @@ const { sql } = users.from(db).where({ id: 1 }).explain();
 ### Expression helpers (preferred for complex conditions)
 
 ```ts
-import { eq, ne, gt, gte, lt, lte, like, ilike, inList, isNull, isNotNull, and, or, not, raw } from "@coderbuzz/sql";
+// Not exported from the root: take them from the dialect namespace
+const { eq, ne, gt, gte, lt, lte, like, ilike, inList, isNull, isNotNull, and, or, not, raw } = pg;
 
 .where(eq("id", 5))
 .where(gte("score", 90))
 .where(like("email", "%@example.com"))
-.where(ilike("name", "%alice%"))      // case-insensitive, PostgreSQL
+.where(ilike("name", "%alice%"))      // emits ILIKE on every dialect; only PostgreSQL accepts it
 .where(inList("id", [1, 2, 3]))
 .where(isNull("deleted_at"))
 .where(isNotNull("email"))
@@ -569,7 +586,9 @@ import { eq, ne, gt, gte, lt, lte, like, ilike, inList, isNull, isNotNull, and, 
 .where(and(eq("active", true), gte("score", 90), not(isNull("email"))))
 .where(or(eq("role", "admin"), eq("role", "owner")))
 
-// Raw fragment with params
+// Raw fragment with params. The SQL is inserted verbatim: use `?`, which the
+// pg/mssql engines rewrite to $N/@pN at execute time. On PostgreSQL/MSSQL this
+// is only correct when no other parameter precedes it (see section 24).
 .where(raw("created_at > NOW() - INTERVAL ? DAY", [7]))
 
 // Raw fragment (no params)
@@ -645,9 +664,10 @@ done.
 ```ts
 const batcher = db.batchInsert("events", {
   wait: 50, // ms of inactivity before flush (REQUIRED)
-  max: 5_000, // flush when pending reaches this count
-  timeout: 2_000, // force flush after this many ms from first write
-  maxInflight: 4, // concurrent flushes allowed before write() waits
+  max: 5_000, // flush when pending reaches this count (default 1000)
+  timeout: 2_000, // force flush after this many ms from first write (default 5000)
+  maxInflight: 4, // concurrent flushes allowed before write() waits (default 4)
+  heterogeneousRows: "reject", // default; "union" fills absent keys with NULL
   settings: { async_insert: "1" }, // engine-specific (ClickHouse)
   onError: (err, rows) => { /* REQUIRED: retry or dead-letter these rows */ },
 });
@@ -778,7 +798,9 @@ await db.transaction(fn, {
 
 `setup` is where `SET LOCAL` belongs: it is the mechanism PostgreSQL
 row-level security depends on, and it is correct only inside a
-single-connection transaction.
+single-connection transaction. For shared-schema multi-tenancy prefer
+`engine.forTenant(tenantId(id))` (both PostgreSQL engines); the full guide is
+`docs/multi-tenancy.md` in the monorepo.
 
 ### Savepoints
 
@@ -833,7 +855,7 @@ db.use(async (query, next) => {
 
 ## 16. Streaming and Prepared Queries
 
-### Streaming (SQLite + PostgreSQL only)
+### Streaming (SQLite on Bun + PostgreSQL only)
 
 ```ts
 for await (const row of users.from(db).where({ active: true }).stream()) {
@@ -842,12 +864,15 @@ for await (const row of users.from(db).where({ active: true }).stream()) {
 // Throws on unsupported dialects: "Streaming is not supported by this dialect."
 ```
 
-### Prepared queries (SQLite + PostgreSQL only)
+### Prepared queries (SQLite on Bun + PostgreSQL only)
+
+`sqlite-node` and `sqlite-deno` do not override `stream()`/`prepare()`, so on
+Node.js and Deno `@coderbuzz/sql/sqlite` throws for both.
 
 ```ts
 const prepared = users.from(db).where({ id: 1 }).prepare();
 const rows = await prepared.execute();
-prepared.close();
+await prepared.close(); // Promise on PostgreSQL: DEALLOCATEs and releases the held connection
 // Throws on unsupported dialects: "Prepared statements are not supported by this dialect."
 ```
 
@@ -1030,7 +1055,7 @@ ch.uuid()  ch.ipv4()  ch.ipv6()  ch.lowCardinality(type)
 | **Identifier quoting**      | `"id"` (PG, SQLite) · `` `id` `` (MySQL, CH) · `[id]` (MSSQL)                                          |
 | **Placeholders**            | `?` (SQLite/MySQL/CH) · `$N` (PG) · `@pN` (MSSQL)                                                      |
 | **RETURNING**               | PostgreSQL + SQLite only. Others throw `"RETURNING is not supported by this dialect"`                       |
-| **FULL OUTER JOIN**         | PostgreSQL + ANSI only. SQLite/MySQL/ClickHouse throw at compile time                                       |
+| **FULL OUTER JOIN**         | PostgreSQL, MSSQL and ANSI. SQLite/MySQL/ClickHouse throw at compile time                                   |
 | **ClickHouse params**       | Values inlined into SQL (HTTP API has no native binding). Safe via `escapeClickHouseValue()`                |
 | **ClickHouse CREATE INDEX** | Not emitted. Indexes are defined via the ENGINE / ORDER BY clause                                           |
 | **ClickHouse UNIQUE**       | Not supported. Throws if `.unique()` is used in a ClickHouse table                                          |
@@ -1079,7 +1104,7 @@ const compiled = users.from(db)
   .toSQL();
 
 console.log(compiled.sql);
-// SELECT "id", "name" FROM users WHERE (active = ? AND score >= ?) ORDER BY id ASC LIMIT 10
+// SELECT id, name FROM users WHERE ("active" = ? AND "score" >= ?) ORDER BY id ASC LIMIT 10;
 console.log(compiled.params);
 // [true, 90]
 ```
@@ -1135,8 +1160,8 @@ const rows = await db.execute(`SELECT * FROM users WHERE name = '${name}'`);
 const rows = await db.sql`SELECT * FROM users WHERE name = ${name}`.execute();
 ```
 
-**DO NOT** call `.stream()` or `.prepare()` on MySQL, MSSQL, or ClickHouse
-engines: they throw.
+**DO NOT** call `.stream()` or `.prepare()` on MySQL (either engine), MSSQL,
+ClickHouse, or SQLite on Node.js/Deno: they throw.
 
 **DO NOT** use `.returning()` on MySQL, MSSQL, or ClickHouse: throws `"RETURNING is not supported by this dialect"`.
 
@@ -1146,6 +1171,12 @@ compile time.
 **DO NOT** call `batcher.write()` after `batcher.close()`: rejects.
 
 **DO NOT** forget `await batcher.close()`: rows may be left unwritten.
+
+**DO NOT** put `raw(sql, params)` after another parameterised condition on
+PostgreSQL or MSSQL. The fragment's `?` is left as-is at compile time while the
+other placeholders are numbered, so `and(eq('a', 1), raw('b > ?', [2]))`
+compiles to `"a" = $1 AND b > ?`, and the engine's `?`-to-`$N` rewrite then
+turns it into `b > $1`, binding `1` instead of `2`.
 
 **DO NOT** use the pooled engine inside a transaction callback. Use `tx`:
 
@@ -1161,7 +1192,8 @@ await db.transaction(async (tx) => { await tx.execute(insertSql); });
 `.from()`, or a join `ON` condition. These cannot be bound parameters, so they
 are interpolated. They are validated and will throw `UnsafeIdentifierError` on
 anything dangerous, but that is a guard, not a licence: map a sort parameter
-through a fixed allow-list of column names:
+through a fixed allow-list of column names. `assertSafeFragment()` (root
+export) runs the same check on a fragment you build yourself:
 
 ```ts
 // WRONG
@@ -1194,7 +1226,7 @@ so there is no conversion at the HTTP boundary, and conversions are where
 precision goes:
 
 ```ts
-import { decimal, object } from "@coderbuzz/veta";
+import { decimal, object, string } from "@coderbuzz/veta";
 
 const postJournal = object({
   ref: string(),
@@ -1212,9 +1244,10 @@ returns a float64. Only the typed path rewrites it. In raw SQL, select
 column on SQLite; they run on text or floats. Fetch and use
 `@coderbuzz/sql/decimal` (`sumDecimals`, `compareDecimals`).
 
-**Expect `BIGINT` and `COUNT(*)` as strings in raw MySQL results.** The engine
-enables `bigNumberStrings`, matching PostgreSQL. `count()` on the typed path
-still returns a number.
+**Expect `BIGINT` and `COUNT(*)` as strings in raw `mysql2` results.** The
+`@coderbuzz/sql/mysql` engine enables `bigNumberStrings`, matching PostgreSQL.
+The `mysql-bun` engine returns them as numbers when they fit a float64 (see
+section 27). `count()` on the typed path returns a number on both.
 
 **DO NOT** use `DELETE` or `UPDATE` without `.where()` unless you intend to
 affect all rows. Add a middleware guard in production code.
@@ -1453,7 +1486,7 @@ db.tenantSetting;                                  // string
 db.client;                                         // the raw Bun.SQL object (LISTEN/NOTIFY, file(), beginDistributed)
 db.forTenant(tenantId(id));                        // TenantScopedSql
 db.unsafeCrossTenant(reason, async admin => ...);  // needs config.crossTenant
-db.withAdvisoryLock(key, fn, wait?);               // Promise<R | undefined>
+db.withAdvisoryLock(key, fn, wait = true);         // Promise<R | undefined>; wait=false → undefined if held
 db.stream(compiledQuery);                          // AsyncIterable<row>
 db.prepare(compiledQuery);                         // { execute(params?), close() }
 await db.close();                                  // closes both clients
@@ -1656,9 +1689,13 @@ const rows = await db.sql<{ id: number; name: string }[]>`
 ### Batch write + close
 
 ```ts
-const batcher = db.batchInsert("logs", { wait: 100, max: 1000 });
+const batcher = db.batchInsert("logs", {
+  wait: 100,
+  max: 1000,
+  onError: (err, rows) => deadLetter.push({ err, rows }), // required
+});
 for (const log of logBuffer) {
-  batcher.write(log);
+  await batcher.write(log);
 }
 await batcher.close();
 ```
@@ -1668,10 +1705,10 @@ await batcher.close();
 ```ts
 try {
   await db.transaction(async (tx) => {
-    await accounts.update(tx).set({ balance: db.sql`balance - ${amount}` })
-      .where({ id: fromId }).execute();
-    await accounts.update(tx).set({ balance: db.sql`balance + ${amount}` })
-      .where({ id: toId }).execute();
+    // .set() binds every value as a parameter, so an expression such as
+    // `balance - x` has to go through the tagged template instead.
+    await tx.sql`UPDATE accounts SET balance = balance - ${amount} WHERE id = ${fromId}`.execute();
+    await tx.sql`UPDATE accounts SET balance = balance + ${amount} WHERE id = ${toId}`.execute();
   });
 } catch (e) {
   // transaction was rolled back automatically
@@ -1716,10 +1753,11 @@ const rows = await db
 
 ```
 Package: @coderbuzz/sql
-Version: 0.1.3
+Version: 0.8.1
 License: MIT
 Type:    ESM only (type: "module")
-Peer deps (all optional): pg, mysql2, mssql, better-sqlite3, @db/sqlite
+Peer deps (all optional): pg, mysql2, mssql, better-sqlite3
+(@db/sqlite, used on Deno, is loaded at runtime but not declared as a peer dep)
 Runtime dep: @coderbuzz/veta (internal, schema coercion)
 ```
 
@@ -1742,3 +1780,26 @@ Runtime dep: @coderbuzz/veta (internal, schema coercion)
 | `@coderbuzz/sql/mssql-types`      | MSSQL column factories only         |
 | `@coderbuzz/sql/clickhouse-types` | ClickHouse column factories only    |
 | `@coderbuzz/sql/ansi`             | ANSI column factories only          |
+
+---
+
+## 30. Benchmarks
+
+Machine-readable source of truth: `https://raw.githubusercontent.com/coderbuzz/benchmarks/main/results/latest.json` (each entry has `winner`, `factorVsNext`, `higherIsBetter`). Quote numbers from there, not from memory.
+
+Full results at **[github.com/coderbuzz/benchmarks](https://github.com/coderbuzz/benchmarks)**.
+
+SQL query compilation throughput on Apple M-series, Bun runtime. Higher is better.
+
+| Scenario | @coderbuzz/sql | Kysely | Factor vs Kysely | Drizzle ORM | Factor vs Drizzle |
+|---|---|---|---|---|---|
+| SELECT simple | **1,700,391 ops/s** | 561,869 | **3.0x** | 34,239 | **49.7x** |
+| SELECT JOIN (2 tables) | **2,208,322 ops/s** | 310,690 | **7.1x** | 16,801 | **131.4x** |
+| INSERT single row | **2,954,261 ops/s** | 393,159 | **7.5x** | 55,085 | **53.6x** |
+| INSERT batch 100 rows | **134,187 ops/s** | 17,634 | **7.6x** | 914 | **146.8x** |
+| CTE (WITH clause) | **831,703 ops/s** | 224,893 | **3.7x** | 12,222 | **68.0x** |
+| 10 nested WHERE conditions | **656,309 ops/s** | 117,064 | **5.6x** | 12,692 | **51.7x** |
+
+`@coderbuzz/sql` is 3-8x faster than Kysely and 50-147x faster than Drizzle ORM across every query type. The gap widens with query complexity (batch, JOIN, conditions) due to `@coderbuzz/sql`'s zero-overhead string compilation strategy vs Kysely's AST-based approach and Drizzle's ORM abstraction layer.
+
+These measure query **compilation** only (building the SQL string), not database round trips.

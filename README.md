@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@9a7a8a5 -->
+<!-- docs: sync from coderbuzz/codex@b37bd48 -->
 
 # @coderbuzz/sql
 
@@ -13,7 +13,7 @@
   <a href="https://codecov.io/gh/coderbuzz/sql"><img src="https://codecov.io/gh/coderbuzz/sql/graph/badge.svg" alt="Codecov" /></a>
 </p>
 
-`@coderbuzz/sql` is a type-safe SQL toolkit that gives you the **full power of SQL** without the abstraction leaks of ORMs or the verbosity of raw query builders. Write schema definitions once, then use them across **8 database dialects** for DDL, typed queries, migrations, batch inserts, and streaming.
+`@coderbuzz/sql` is a type-safe SQL toolkit that gives you the **full power of SQL** without the abstraction leaks of ORMs or the verbosity of raw query builders. Write schema definitions once, then use them across **5 databases** for DDL, typed queries, migrations, batch inserts, and streaming.
 
 This is not an ORM. There are no lazy-loaded relations, no magical `save()` methods, no hidden N+1 queries. You write SQL, but with **full type safety**, **fluent query builders**, **dialect-aware compilation**, and **zero runtime overhead** compared to hand-written queries.
 
@@ -24,12 +24,12 @@ This is not an ORM. There are no lazy-loaded relations, no magical `save()` meth
 | Pain Point | Drizzle ORM | Kysely | Prisma | **@coderbuzz/sql** |
 |---|---|---|---|---|
 | Runtime agnostic | Bun, Node, Deno | Bun, Node, Deno | Node only | **Bun, Node, Deno** |
-| Dialects supported | 5 (SQLite, PG, MySQL, PG, SQLite) | 6 | 5 (with connectors) | **5**: SQLite, PG, MySQL, MSSQL, ClickHouse |
+| Dialects supported | PG, MySQL, SQLite (+ variants) | 6 | 5 (with connectors) | **5**: SQLite, PG, MySQL, MSSQL, ClickHouse |
 | Query builder vs ORM | Hybrid (ORM-like) | Query builder | ORM (magic) | **Query builder**: full SQL control |
 | Learning curve | Steady (ORM conventions) | Low (SQL-like) | Steep (Prisma schema, CLI) | **Low**: you already know SQL |
 | Migration tools | Drizzle Kit (CLI) | Manual | Prisma Migrate (CLI) | **Built-in**: `introspect()` + `diff()` + `applyDiff()` |
 | Batch insert | External | External | `createMany()` | **Built-in batcher**: debounce, timeout, backpressure |
-| Streaming | Limited | No | No | **Built-in**: cursor-based `stream()` for SQLite, PG |
+| Streaming | Limited | No | No | **Built-in**: cursor-based `stream()` for SQLite (Bun), PG |
 | Prepared statements | Some dialects | Some dialects | Via Prisma Client | **Built-in**: SQLite (Bun), PG |
 | Middleware pipeline | Hooks only | No | Middleware | **Plugin system**: `db.use(middleware)` for logging, tracing, safety |
 | Raw SQL tagged templates | Yes | Yes | `$queryRaw` | **Yes**: `db.sql\`SELECT * FROM users WHERE id = ${id}\`` with dialect-aware placeholders |
@@ -56,7 +56,7 @@ This is not an ORM. There are no lazy-loaded relations, no magical `save()` meth
 - **Fluent query builders**: SELECT, INSERT, UPDATE, DELETE with full type inference
 - **Safe raw SQL**: `db.sql\`...\`` tagged templates with dialect-aware placeholders
 - **Transactions**: single-connection, with savepoints, isolation levels, row locking, and `SET LOCAL` setup for RLS
-- **Streaming**: cursor-based `stream()` for large result sets (SQLite, PostgreSQL)
+- **Streaming**: cursor-based `stream()` for large result sets (SQLite on Bun, PostgreSQL)
 - **Prepared statements**: `prepare()` with caching (SQLite/Bun, PostgreSQL)
 - **High-throughput batch inserts**: `InsertBatcher` with debounce, row count, and timeout strategies
 - **Schema introspection and migration**: `introspect()`, `diff()`, `applyDiff()`, no CLI needed
@@ -84,7 +84,7 @@ SQL query compilation throughput on Apple M-series, Bun runtime. Higher is bette
 | CTE (WITH clause) | **831,703 ops/s** | 224,893 | **3.7x** | 12,222 | **68.0x** |
 | 10 nested WHERE conditions | **656,309 ops/s** | 117,064 | **5.6x** | 12,692 | **51.7x** |
 
-`@coderbuzz/sql` is 3-7x faster than Kysely and 50-147x faster than Drizzle ORM across every query type. The gap widens with query complexity (batch, JOIN, conditions) due to `@coderbuzz/sql`'s zero-overhead string compilation strategy vs Kysely's AST-based approach and Drizzle's ORM abstraction layer.
+`@coderbuzz/sql` is 3-8x faster than Kysely and 50-147x faster than Drizzle ORM across every query type. The gap widens with query complexity (batch, JOIN, conditions) due to `@coderbuzz/sql`'s zero-overhead string compilation strategy vs Kysely's AST-based approach and Drizzle's ORM abstraction layer.
 
 ---
 
@@ -205,7 +205,7 @@ const accounts = pg.table("accounts", {
 ```ts
 import type { InferRow } from "@coderbuzz/sql";
 type AccountRow = InferRow<typeof accounts.columns>;
-// { id: number; email: string; display_name: string; balance: number; ... }
+// { id: number; email: string; display_name: string; balance: string; ... }
 ```
 
 ### Bind a Table to an Engine
@@ -244,7 +244,6 @@ Introspect, diff, and apply schema changes:
 import { introspect } from "@coderbuzz/sql/dist/migration/introspect";
 import { diff } from "@coderbuzz/sql/dist/migration/diff";
 import { applyDiff } from "@coderbuzz/sql/dist/migration/apply";
-import { sqliteCompiler } from "@coderbuzz/sql/dist/dialects/sqlite";
 
 const db = sqlite.connect({ path: "./app.db" });
 const usersV2 = sqlite.table("users", {
@@ -262,6 +261,11 @@ for (const stmt of stmts) {
   await db.execute(stmt);
 }
 ```
+
+> **Not importable yet.** `introspect`, `diff` and `applyDiff` live in
+> `src/migration/` but are not a tsup entry and not in the package's `exports`
+> map, so the `@coderbuzz/sql/dist/migration/*` paths above do not resolve in
+> the published package. The example shows the API, not a working import.
 
 **Dialect support:**
 
@@ -316,8 +320,9 @@ await db.withAdvisoryLock(872341n, async () => {
 });
 ```
 
-`withAdvisoryLock(key, fn, wait = false)` returns `undefined` instead of
-waiting when another instance holds the lock.
+`withAdvisoryLock(key, fn, wait = true)` waits for the lock by default. Pass
+`wait = false` to get `undefined` back instead of waiting when another instance
+holds it.
 
 The version ledger, checksums and file loading belong in your application.
 These are the primitives to build them on.
@@ -366,7 +371,7 @@ const rows = await active.union(invited).execute();
 
 // Compile without executing
 const compiled = users.from(db).fields("id", "email").where({ active: true }).toSQL();
-console.log(compiled.sql); // "SELECT "id", "email" FROM users WHERE active = ?"
+console.log(compiled.sql); // 'SELECT id, email FROM users WHERE "active" = ?;'
 console.log(compiled.params); // [true]
 ```
 
@@ -723,8 +728,8 @@ db.select("*").from("jurnal").order_by(req.query.sort);
 
 Rejected: statement terminators, SQL comments, line breaks, unterminated
 quotes, and keywords that would open a new clause or statement (`SELECT`,
-`UNION`, `FROM`, `DROP`, …). `limit()` and `offset()` must be non-negative safe
-integers, checked at runtime: their `number` signature does not stop a query
+`UNION`, `FROM`, `DROP`, …). Both arguments of `limit(count, offset = 0)` must be
+non-negative safe integers, checked at runtime: their `number` signature does not stop a query
 string from arriving through an `any`.
 
 Accepted as before: `"created_at DESC"`, `"amount DESC NULLS LAST"`,
@@ -1089,9 +1094,9 @@ table.tableName                 // table name string
 table.columns                   // column definitions (for type inference)
 table.options                   // table options (engine, orderBy, etc.)
 table.toAst()                   // produce AST for migration tools
-table.createTable(dialect?)     // generate "CREATE TABLE ..." DDL
-table.createIndexes(dialect?)   // generate "CREATE INDEX ..." DDL strings[]
-table.dropTable()               // generate "DROP TABLE IF EXISTS ..."
+table.createTable(dialect, ifNotExists = true)    // generate "CREATE TABLE ..." DDL
+table.createIndexes(dialect, ifNotExists = true)  // generate "CREATE INDEX ..." DDL strings[]
+table.dropTable(ifExists = true)                  // generate "DROP TABLE IF EXISTS ..."
 table.from(engine)              // start a typed SELECT query
 table.insert(engine)            // start a typed INSERT query
 table.update(engine)            // start a typed UPDATE query
@@ -1101,7 +1106,7 @@ table.bind(engine)              // return BoundTable<S> (no-repeat-engine API)
 
 ### `SelectQuery<T>`
 
-Full chain: `.with()`, `.select()`, `.from()`, `.left_join()`, `.inner_join()`, `.right_join()`, `.full_join()`, `.where()`, `.group_by()`, `.having()`, `.order_by()`, `.limit()`, `.union()`, `.union_all()`, `.intersect()`, `.except()`, `.toSQL()`, `.explain()`, `.explain_analyze()`, `.execute()`, `.stream()`, `.prepare()`
+Full chain: `.with()`, `.select()`, `.select_distinct()`, `.from()`, `.left_join()`, `.inner_join()`, `.right_join()`, `.full_join()`, `.where()`, `.group_by()`, `.having()`, `.order_by()`, `.limit(count, offset?)`, `.forUpdate()`, `.forShare()`, `.union()`, `.union_all()`, `.intersect()`, `.except()`, `.toSQL()`, `.explain()`, `.explain_analyze()`, `.execute()`, `.stream()`, `.prepare()`
 
 ### `InsertBatcher<T>`
 
