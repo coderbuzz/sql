@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@643d093 -->
+<!-- docs: sync from coderbuzz/codex@6840bc7 -->
 
 # @coderbuzz/sql: AI Expert Knowledge Reference
 
@@ -858,13 +858,45 @@ prepared.close();
 import { avg, count, max, min, sum } from "@coderbuzz/sql";
 
 // All return ComputedField<T> for use in .fields()
-count(); // COUNT(*) AS count
-count("id", "total"); // COUNT(id) AS total
-sum("amount", "total"); // SUM(amount) AS total
-avg("score", "avgScore"); // AVG(score) AS avgScore
-min<Date>("created_at", "oldest"); // MIN(created_at) AS oldest
-max<number>("score", "topScore"); // MAX(score) AS topScore
+count(); // COUNT(*) AS count                  ComputedField<number>
+count("id", "total"); // COUNT(id) AS total    ComputedField<number>
+sum("amount", "total"); // SUM(amount) AS total ComputedField<string | null>
+avg("score", "avgScore"); // AVG(score) AS avgScore ComputedField<string | null>
+min<Date>("created_at", "oldest"); // MIN(created_at) AS oldest  (no parser)
+max<number>("score", "topScore"); // MAX(score) AS topScore      (no parser)
 ```
+
+Signatures:
+
+```ts
+count(field?: string /* '*' */, alias?: string /* 'count' */): ComputedField<number>
+sum(field: string, alias?: string /* 'sum' */): ComputedField<string | null>
+avg(field: string, alias?: string /* 'avg' */): ComputedField<string | null>
+min<T = number>(field: string, alias?: string /* 'min' */): ComputedField<T>
+max<T = number>(field: string, alias?: string /* 'max' */): ComputedField<T>
+expr<T, A extends string>(rawSql: string, alias: A, parse?: (val: any) => T): ComputedField<T, A>
+```
+
+A `ComputedField` may carry `parse`. On the typed path
+(`table.from(db).fields(...).execute()`) the result key `alias` is run through
+it, exactly like a column parser, and `null` is never passed to it:
+
+- `count()` parses with `Number`. PostgreSQL (`pg` and `Bun.SQL`) and MySQL
+  return `COUNT(*)` as a 64-bit integer string (`'41'`); the typed path always
+  gives `41`. A count never nears 2^53, so this is exact.
+- `sum()`/`avg()` parse with `parseExactNumeric`, so the result is a decimal
+  string on every engine (`'12345678901234577.98'`), or `null` over zero rows.
+  `SUM(int)` on SQLite returns a number and becomes `'30'`.
+- On MSSQL, `sum()`/`avg()` are compiled as `CONVERT(VARCHAR(40), SUM(x), 2)`
+  so the driver never reads them as float64. Over a `FLOAT` column that text
+  is in exponent form (`'3.000000000000000e-001'`); for float aggregates use
+  `expr<number>('SUM(x)', 'total')` instead.
+- On SQLite, `SUM()` over a `decimal()` column (stored as `TEXT`) is a float
+  sum: `'0.1' + '0.2'` gives `'0.30000000000000004'`. Sum in JavaScript with
+  `sumDecimals()` instead.
+- `min`/`max` carry no parser: their type depends on the column.
+
+Raw `db.execute()` / `db.select()` results are never parsed.
 
 ---
 
@@ -875,6 +907,65 @@ max<number>("score", "topScore"); // MAX(score) AS topScore
 > `number`: float64 cannot represent them exactly, and `pg`/`mysql2` return
 > them as strings anyway. `integer`, `smallint`, `int`, `serial`, `float`,
 > `real` and `doublePrecision` remain `number`.
+
+#### Exact numerics per engine
+
+Every engine's `decimal()` reads back as the exact decimal string on the typed
+path. Each needs something different to get there, verified against live
+databases in `tests/sql.decimal-engines.test.ts` with `'12345678901234567.89'`
+(past float64's 15 significant digits), `'10.10'` (trailing zero) and
+`'-0.01'`:
+
+| Engine | Driver returns | What this package does | `bigint()` |
+|---|---|---|---|
+| `postgres` (`pg`) | `NUMERIC` as string | nothing needed | string (driver) |
+| `postgres-bun` (`Bun.SQL`) | `NUMERIC` as string | nothing needed | string, or `bigint` with `bigint: true`; both parse to string |
+| `mysql` (`mysql2`) | `DECIMAL` as string, `BIGINT` as float64 by default | pool created with `supportBigNumbers: true, bigNumberStrings: true` | string |
+| `mssql` (`tedious`) | `DECIMAL`/`NUMERIC`/`MONEY`/`SMALLMONEY` as float64, no option to change it | typed SELECT rewrites those columns to `CONVERT(VARCHAR(40), col, 2) AS col` | string (driver) |
+| `sqlite-bun` / `sqlite-node` / `sqlite-deno` | whatever was stored | `decimal()`/`numeric()` emit DDL `TEXT`, so the string is stored untouched | `number` (unchanged) |
+| `clickhouse` | JSON: `Decimal` as bare number, trailing zeros dropped | every request sends `output_format_json_quote_decimals=1&output_format_decimal_trailing_zeros=1`; `Decimal(p, s)` parses to string | n/a (`int64()` is `number`) |
+
+Writes need nothing: every driver binds a decimal string and the server
+converts it exactly (PostgreSQL `numeric`, MySQL `DECIMAL`, SQL Server
+`NVARCHAR` → `DECIMAL`, ClickHouse quoted literal). `where({ amount: '10.10' })`
+compares by value on all engines except SQLite, where it is a text comparison.
+
+**MSSQL rewrite details** (`BaseCompiler.exactNumericSelect(expr, sqlType?)`,
+which returns `undefined` on every other dialect, so their SQL is unchanged):
+
+```sql
+-- lines.from(db).execute() with amount DECIMAL(19,2), fee MONEY:
+SELECT lines.id, CONVERT(VARCHAR(40), lines.amount, 2) AS amount,
+       CONVERT(VARCHAR(40), lines.fee, 2) AS fee, lines.big FROM lines
+-- .fields('amount', ['fee', 'f'], sum('amount', 'total')):
+SELECT CONVERT(VARCHAR(40), amount, 2) AS amount, CONVERT(VARCHAR(40), fee, 2) AS f,
+       CONVERT(VARCHAR(40), SUM(amount), 2) AS total FROM lines
+```
+
+- Style `2` keeps all four `MONEY` places (style 0 rounds to two) and is
+  ignored for `DECIMAL`/`NUMERIC`.
+- A bare `SELECT *` is expanded to the schema's columns only when one of them
+  is `DECIMAL`/`NUMERIC`/`MONEY`. With joins, the expansion lists each column
+  name once, from the first table that has it (base table first), qualified
+  as `table.col`. Columns in the database but not in the schema are not
+  selected.
+- Raw SQL is not rewritten: `db.execute('SELECT amount FROM lines')` on MSSQL
+  returns a float. Write `CONVERT(VARCHAR(40), amount, 2) AS amount` yourself.
+
+**SQLite details:** SQLite has no decimal type. `DECIMAL(p, s)` gets NUMERIC
+affinity, which stores `'12345678901234567.89'` as the integer
+`12345678901234568` and `'0.1'` as a float. `TEXT` affinity keeps the string.
+Consequences: `ORDER BY`, `<`/`>` and `MIN`/`MAX` compare as text (`'9.00'` >
+`'10.00'`), and `SUM`/`AVG` are float. `precision`/`scale` are accepted and
+ignored. Tables created before this change keep `DECIMAL` columns (NUMERIC
+affinity); the migration diff reports the type change but SQLite cannot
+`ALTER COLUMN`, so rebuild the table. Old REAL values still read as strings
+(`10.1` → `'10.1'`).
+
+**Typed path parses joins and aliases.** `table.from(db).execute()` applies the
+parsers of the base table, of every joined table's columns (first table wins
+on a name clash), of `[column, alias]` fields under the alias, and of computed
+fields that carry `parse`.
 
 ### SQLite
 
@@ -1110,6 +1201,18 @@ const postJournal = object({
 ```
 
 `number()` would accept `1234.5` as a float64 and hand it on looking exact.
+
+**DO NOT** read `DECIMAL` through raw SQL on MSSQL and trust it: `tedious`
+returns a float64. Only the typed path rewrites it. In raw SQL, select
+`CONVERT(VARCHAR(40), col, 2)`.
+
+**DO NOT** rely on `SUM`, `ORDER BY` or range comparisons over a `decimal()`
+column on SQLite; they run on text or floats. Fetch and use
+`@coderbuzz/sql/decimal` (`sumDecimals`, `compareDecimals`).
+
+**Expect `BIGINT` and `COUNT(*)` as strings in raw MySQL results.** The engine
+enables `bigNumberStrings`, matching PostgreSQL. `count()` on the typed path
+still returns a number.
 
 **DO NOT** use `DELETE` or `UPDATE` without `.where()` unless you intend to
 affect all rows. Add a middleware guard in production code.

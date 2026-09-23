@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@643d093 -->
+<!-- docs: sync from coderbuzz/codex@6840bc7 -->
 
 # @coderbuzz/sql
 
@@ -617,6 +617,28 @@ cent. This is also what the drivers already do: `pg` and `mysql2` return these
 columns as strings for exactly this reason, so the declared type now matches
 the value you actually receive.
 
+It holds on every engine, each one getting there its own way:
+
+| Engine | How `decimal()` stays exact |
+|---|---|
+| PostgreSQL (`pg`, `Bun.SQL`) | The driver returns `NUMERIC` as a string |
+| MySQL (`mysql2`) | The driver returns `DECIMAL` as a string; the engine turns on `bigNumberStrings` so `BIGINT` is one too |
+| SQL Server (`mssql`) | The driver reads `DECIMAL`/`MONEY` as float64, so the typed path selects them as text (`CONVERT(VARCHAR(40), col, 2)`) |
+| SQLite (all runtimes) | Stored as `TEXT`, since SQLite has no decimal type and `DECIMAL(p, s)` columns store floats |
+| ClickHouse | The engine asks for quoted decimals with trailing zeros kept |
+
+Aggregates follow the same rule on the typed path: `sum()` and `avg()` are
+`string | null`, and `count()` is a `number` on every engine, including
+PostgreSQL, whose driver returns `COUNT(*)` as a string.
+
+```ts
+import { count, sum } from "@coderbuzz/sql";
+
+const [row] = await jurnal.from(db).fields(count("*", "n"), sum("debit", "total")).execute();
+row.n;      // 3
+row.total;  // "12345678901234577.98"
+```
+
 Do the arithmetic where it is exact: in SQL, or with the decimal helpers this
 package ships.
 
@@ -675,7 +697,13 @@ still `number`: their ranges fit, or they are approximate by nature.
 
 > Row values are parsed only on the typed path (`table.from(db).execute()`),
 > which knows the schema. `db.execute(sql)` returns rows exactly as the driver
-> produced them.
+> produced them. On SQL Server that means a raw `DECIMAL` arrives as a float:
+> select it as `CONVERT(VARCHAR(40), amount, 2)`.
+
+> SQLite keeps each decimal exactly, but compares, sorts and sums it as text
+> or a float. Do money arithmetic with `@coderbuzz/sql/decimal`, not `SUM()`.
+> Tables created with an older version keep their `DECIMAL` columns; rebuild
+> them to get `TEXT` storage.
 
 ---
 
