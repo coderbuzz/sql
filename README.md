@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@6840bc7 -->
+<!-- docs: sync from coderbuzz/codex@30320de -->
 
 # @coderbuzz/sql
 
@@ -65,7 +65,7 @@ This is not an ORM. There are no lazy-loaded relations, no magical `save()` meth
 - **Expression helpers**: `eq`, `and`, `or`, `inList`, `isNull`, `like`, `ilike`, `raw`, etc.
 - **Aggregate helpers**: `count`, `sum`, `avg`, `min`, `max`
 - **Exact decimal arithmetic**: `@coderbuzz/sql/decimal`, a `BigInt`-backed add/subtract/multiply/divide with rounding modes and an `allocate()` that never loses a cent, all with no dependency
-- **Zero-driver PostgreSQL on Bun**: `@coderbuzz/sql/postgres-bun` runs on Bun's built-in `Bun.SQL`
+- **Zero-driver PostgreSQL and MySQL on Bun**: `@coderbuzz/sql/postgres-bun` and `@coderbuzz/sql/mysql-bun` run on Bun's built-in `Bun.SQL`
 - **Infer types**: `InferRow<S>`, `InferSelect<S, F>` for subset field selection
 - **Runtime agnostic**: Bun, Node.js, Deno
 
@@ -106,8 +106,9 @@ bun add better-sqlite3       # SQLite (Node.js)
 
 SQLite on Bun uses `bun:sqlite` (built-in, no driver needed).
 SQLite on Deno uses `@db/sqlite`.
-PostgreSQL on Bun can skip `pg` entirely: import `@coderbuzz/sql/postgres-bun`,
-which uses Bun's built-in SQL client.
+PostgreSQL and MySQL on Bun can skip `pg` and `mysql2` entirely: import
+`@coderbuzz/sql/postgres-bun` or `@coderbuzz/sql/mysql-bun`, which use Bun's
+built-in SQL client.
 
 ---
 
@@ -119,6 +120,7 @@ which uses Bun's built-in SQL client.
 | PostgreSQL | `@coderbuzz/sql/postgres` | `pg` | `pg` |
 | PostgreSQL on Bun | `@coderbuzz/sql/postgres-bun` | `pg` | Bun built-in (`Bun.SQL`), no driver to install |
 | MySQL / MariaDB | `@coderbuzz/sql/mysql` | `mysql` | `mysql2` |
+| MySQL / MariaDB on Bun | `@coderbuzz/sql/mysql-bun` | `mysql` | Bun built-in (`Bun.SQL`), no driver to install |
 | SQL Server | `@coderbuzz/sql/mssql` | `mssql` | `mssql` |
 | ClickHouse | `@coderbuzz/sql/clickhouse` | `ch` | Native `fetch` HTTP |
 
@@ -623,6 +625,7 @@ It holds on every engine, each one getting there its own way:
 |---|---|
 | PostgreSQL (`pg`, `Bun.SQL`) | The driver returns `NUMERIC` as a string |
 | MySQL (`mysql2`) | The driver returns `DECIMAL` as a string; the engine turns on `bigNumberStrings` so `BIGINT` is one too |
+| MySQL (`Bun.SQL`) | The driver returns `DECIMAL` as a string, and a `BIGINT` past 2^53 too |
 | SQL Server (`mssql`) | The driver reads `DECIMAL`/`MONEY` as float64, so the typed path selects them as text (`CONVERT(VARCHAR(40), col, 2)`) |
 | SQLite (all runtimes) | Stored as `TEXT`, since SQLite has no decimal type and `DECIMAL(p, s)` columns store floats |
 | ClickHouse | The engine asks for quoted decimals with trailing zeros kept |
@@ -990,6 +993,40 @@ such as `LISTEN`/`NOTIFY`.
 ```ts
 const db = mysql.connect({ host: "localhost", port: 3306, database: "app", user: "root", password: "secret", connectionLimit: 10 });
 ```
+
+### MySQL on Bun (no driver)
+
+```ts
+// Through Bun's built-in SQL client: nothing to install
+import { mysql } from "@coderbuzz/sql/mysql-bun";
+const db = mysql.connect({ host: "localhost", database: "app", user: "app", password: "secret", connectionLimit: 10, tls: true });
+```
+
+Same namespace and same engine methods as `@coderbuzz/sql/mysql`:
+transactions on one reserved connection, savepoints, isolation levels,
+read-only transactions. Typed queries return the same rows, so on the typed
+path the import path is the only change. Raw `db.execute()` rows differ in
+three places:
+
+| | `mysql2` engine | `Bun.SQL` engine |
+|---|---|---|
+| `DATETIME` / `DATE` | read in the process's local time zone | read as UTC |
+| `BIGINT` (and `COUNT(*)`) | always a string | a number when it fits a float64, else a string |
+| Error `code` | `'ER_DUP_ENTRY'`, ... | `'ERR_MYSQL_SERVER_ERROR'` (`errno` and `sqlState` match) |
+
+> **Switching an existing database:** `mysql2` writes `DATETIME` in local time
+> and Bun in UTC, so the same row reads differently unless the app ran with
+> `TZ=UTC`. And pass `database`, `user` and `password` explicitly: `Bun.SQL`
+> fills in any you leave out from `DATABASE_URL` or `MYSQL_*` environment
+> variables, password included.
+
+MySQL 8 without TLS refuses the login unless you pass
+`allowPublicKeyRetrieval: true`. `mysql2` allows that silently, but on an
+untrusted network it lets a man in the middle read the password, so this
+engine makes you ask for it. Prefer `tls`.
+
+Other options: `connectionString`, `idleTimeout`, `connectionTimeout`,
+`maxLifetime`, `tls`. The raw client is `db.client`.
 
 ### SQL Server
 

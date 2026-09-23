@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@6840bc7 -->
+<!-- docs: sync from coderbuzz/codex@30320de -->
 
 # @coderbuzz/sql: AI Expert Knowledge Reference
 
@@ -48,6 +48,7 @@ import { sqlite } from "@coderbuzz/sql/sqlite";
 import { pg } from "@coderbuzz/sql/postgres";       // driver: `pg` package
 import { pg as pgBun } from "@coderbuzz/sql/postgres-bun"; // driver: Bun built-in, none to install
 import { mysql } from "@coderbuzz/sql/mysql";
+import { mysql as mysqlBun } from "@coderbuzz/sql/mysql-bun"; // driver: Bun built-in, none to install
 import { mssql } from "@coderbuzz/sql/mssql";
 import { ch } from "@coderbuzz/sql/clickhouse";
 ```
@@ -921,6 +922,7 @@ databases in `tests/sql.decimal-engines.test.ts` with `'12345678901234567.89'`
 | `postgres` (`pg`) | `NUMERIC` as string | nothing needed | string (driver) |
 | `postgres-bun` (`Bun.SQL`) | `NUMERIC` as string | nothing needed | string, or `bigint` with `bigint: true`; both parse to string |
 | `mysql` (`mysql2`) | `DECIMAL` as string, `BIGINT` as float64 by default | pool created with `supportBigNumbers: true, bigNumberStrings: true` | string |
+| `mysql-bun` (`Bun.SQL`) | `DECIMAL` as string; `BIGINT` as `number` when ≤ 2^53, `string` beyond | nothing needed | string (parser stringifies the `number`) |
 | `mssql` (`tedious`) | `DECIMAL`/`NUMERIC`/`MONEY`/`SMALLMONEY` as float64, no option to change it | typed SELECT rewrites those columns to `CONVERT(VARCHAR(40), col, 2) AS col` | string (driver) |
 | `sqlite-bun` / `sqlite-node` / `sqlite-deno` | whatever was stored | `decimal()`/`numeric()` emit DDL `TEXT`, so the string is stored untouched | `number` (unchanged) |
 | `clickhouse` | JSON: `Decimal` as bare number, trailing zeros dropped | every request sends `output_format_json_quote_decimals=1&output_format_decimal_trailing_zeros=1`; `Decimal(p, s)` parses to string | n/a (`int64()` is `number`) |
@@ -1426,7 +1428,118 @@ opened. Use it for Bun features this engine does not wrap, not for queries.
 
 ---
 
-## 27. Quick Code Patterns
+## 27. MySQL on Bun (`@coderbuzz/sql/mysql-bun`)
+
+`BunMySQLEngine` drives MySQL and MariaDB through Bun's built-in SQL client
+(`Bun.SQL` with `adapter: 'mysql'`; verified on Bun 1.4.2 against MySQL 8.4).
+No peer dependency. The exported `mysql` namespace has exactly the members of
+the one from `@coderbuzz/sql/mysql` (a test asserts it), and `mysqlBun` is an
+alias for files that import both.
+
+```ts
+import { mysql } from "@coderbuzz/sql/mysql-bun";
+const db = mysql.connect({ host: "localhost", database: "app", user: "app", password: "secret" });
+```
+
+On a runtime without `Bun.SQL` the constructor throws with a message pointing at
+`@coderbuzz/sql/mysql`; it does not fail at import time. Connecting is lazy:
+`connect()` never throws for an unreachable server, the first query does.
+
+### Parity with the `mysql2` engine
+
+`tests/sql.mysql.test.ts` runs its whole suite (DDL, CRUD, joins, CTE, UNION,
+transactions, savepoints, SERIALIZABLE locking, middleware, migrate, batch
+insert) once per engine. Both pass the same assertions.
+
+| Capability | `@coderbuzz/sql/mysql` | `@coderbuzz/sql/mysql-bun` |
+| --- | --- | --- |
+| `transaction(fn, { isolation, readOnly, setup })` | one pooled connection | one reserved connection |
+| `tx.savepoint()` | yes | yes |
+| Middleware sees `START TRANSACTION`/`COMMIT`/`ROLLBACK` | yes | yes |
+| Connection destroyed after a failed `ROLLBACK` | `conn.destroy()` | `connection.close()` |
+| `stream()` / `prepare()` | throws (not supported) | throws (not supported) |
+| Driver | `mysql2` peer dependency | none |
+
+Why the failed-ROLLBACK rule matters here: Bun's `release()` does **not** roll
+back. Measured with a pool of one connection: after `START TRANSACTION`, an
+`INSERT` and `release()`, the next query ran on the same `CONNECTION_ID()` with
+the transaction still open and the uncommitted row visible. The engine only
+releases after a clean `COMMIT`/`ROLLBACK`; otherwise it destroys the
+connection. A test forces `ROLLBACK` to fail and checks that the next query
+gets a different connection and cannot see the row.
+
+### Config (`BunMySQLConfig`)
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `host` / `port` | `localhost` / `3306` | pinned, so `MYSQL_HOST`/`DATABASE_URL` cannot redirect the engine |
+| `database` / `user` / `password` | **from the environment** | see the warning below |
+| `connectionString` | none | `mysql://user:pass@host:port/db`; explicit fields win |
+| `connectionLimit` | `10` | pool size, same name as the `mysql2` engine |
+| `idleTimeout` / `connectionTimeout` / `maxLifetime` | driver default | seconds |
+| `tls` | none | passed through to `Bun.SQL` |
+| `allowPublicKeyRetrieval` | `false` | allow RSA key retrieval for `caching_sha2_password` without TLS |
+
+**Environment fallback (measured on Bun 1.4.2).** `Bun.SQL` fills every
+connection field left out from the environment, and an empty string counts as
+left out. `database`, `user` and `password` resolve from `DATABASE_URL` first,
+then `MYSQL_DATABASE` / `MYSQL_USER` / `MYSQL_PASSWORD`. With
+`DATABASE_URL=postgres://app:pgsecret@pg-host/app` in the environment,
+`mysql.connect({ host: 'mysql-host', user: 'root' })` logs in to `mysql-host`
+with password `pgsecret`, handing the PostgreSQL password to the MySQL server.
+There is no option to turn this off. Always pass `database`, `user` and
+`password` explicitly, or a full `connectionString`. The `mysql2` engine reads
+no environment variables.
+
+**Date values move between engines.** `mysql2` writes and reads `DATETIME` in
+the process's local time zone; `Bun.SQL` uses UTC. Measured on a `+07:00`
+machine, the same `Date('2024-01-02T03:04:05.678Z')` is stored as
+`2024-01-02 10:04:05.678` by `mysql2` and `2024-01-02 03:04:05.678` by Bun.
+Each engine round-trips its own writes, but switching an existing database
+from `mysql2` to this engine shifts every `DATETIME` by the offset, unless the
+application ran with `TZ=UTC`. Check `TZ` before switching.
+
+MySQL 8 without TLS and without `allowPublicKeyRetrieval: true` fails the first
+query with `ERR_MYSQL_PUBLIC_KEY_RETRIEVAL_NOT_ALLOWED`. The default is `false`
+because without TLS a man in the middle can supply its own key and read the
+password. `mysql2` allows it without asking, so moving from `mysql2` to this
+engine against a non-TLS MySQL 8 needs either `tls` or this flag.
+
+### Type mapping (verified against MySQL 8.4, raw `db.execute()` rows)
+
+| MySQL type | `mysql2` engine | `Bun.SQL` engine |
+| --- | --- | --- |
+| `DECIMAL(p,s)` | `string`, exact | `string`, exact |
+| `SUM`/`AVG` over `DECIMAL` or `INT` | `string` | `string` |
+| `BIGINT` | `string` (`bigNumberStrings`) | `number` if ≤ 2^53, else `string` |
+| `COUNT(*)` | `string` | `number` |
+| `INT` / `TINYINT(1)` / `YEAR` / `INT UNSIGNED` | `number` | `number` |
+| `FLOAT` / `DOUBLE` | `number` | `number` |
+| `DATETIME` / `DATE` | `Date`, **local** time zone | `Date`, **UTC** |
+| `TIME` | `string` | `string` |
+| `JSON` | parsed object | parsed object |
+| `BLOB` / `VARBINARY` | `Buffer` | `Buffer` |
+| `ENUM` | `string` | `string` |
+
+On the typed path (`table.from(db).execute()`) `bigint()` columns and `count()`
+parse to the same `string` / `number` on both engines, so only raw results and
+dates differ. Parameters: `true`/`false` bind as `1`/`0`, a decimal string binds
+exactly, a `Date` is written as its UTC wall-clock time (`mysql2`: local).
+
+Errors are `MySQLError` with `code: 'ERR_MYSQL_SERVER_ERROR'` for every server
+error. `errno` (`1062` duplicate key, `1054` unknown column) and `sqlState`
+(`'23000'`, `'42S22'`) match `mysql2`, so branch on those, never on `code`.
+
+### Methods beyond the shared `Sql` surface
+
+```ts
+db.client;        // the raw Bun.SQL object; bypasses middleware and transactions
+await db.close();
+```
+
+---
+
+## 28. Quick Code Patterns
 
 ### Full CRUD (SQLite)
 
@@ -1563,7 +1676,7 @@ const rows = await db
 
 ---
 
-## 28. Package Metadata
+## 29. Package Metadata
 
 ```
 Package: @coderbuzz/sql
@@ -1584,6 +1697,7 @@ Runtime dep: @coderbuzz/veta (internal, schema coercion)
 | `@coderbuzz/sql/postgres-bun`     | `pg` namespace + `BunPostgresEngine` |
 | `@coderbuzz/sql/decimal`          | Exact decimal arithmetic helpers    |
 | `@coderbuzz/sql/mysql`            | `mysql` namespace + `MySQLEngine`   |
+| `@coderbuzz/sql/mysql-bun`        | `mysql` namespace + `BunMySQLEngine` |
 | `@coderbuzz/sql/mssql`            | `mssql` namespace + `MSSQLEngine`   |
 | `@coderbuzz/sql/clickhouse`       | `ch` namespace + `ClickHouseEngine` |
 | `@coderbuzz/sql/sqlite-types`     | SQLite column factories only        |
