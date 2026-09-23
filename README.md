@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@60ca8c4 -->
+<!-- docs: sync from coderbuzz/codex@643d093 -->
 
 # @coderbuzz/sql
 
@@ -24,7 +24,7 @@ This is not an ORM. There are no lazy-loaded relations, no magical `save()` meth
 | Pain Point | Drizzle ORM | Kysely | Prisma | **@coderbuzz/sql** |
 |---|---|---|---|---|
 | Runtime agnostic | Bun, Node, Deno | Bun, Node, Deno | Node only | **Bun, Node, Deno** |
-| Dialects supported | 5 (SQLite, PG, MySQL, PG, SQLite) | 6 | 5 (with connectors) | **8**: SQLite, PG, MySQL, MSSQL, ClickHouse, Oracle, Snowflake, Databricks |
+| Dialects supported | 5 (SQLite, PG, MySQL, PG, SQLite) | 6 | 5 (with connectors) | **5**: SQLite, PG, MySQL, MSSQL, ClickHouse |
 | Query builder vs ORM | Hybrid (ORM-like) | Query builder | ORM (magic) | **Query builder**: full SQL control |
 | Learning curve | Steady (ORM conventions) | Low (SQL-like) | Steep (Prisma schema, CLI) | **Low**: you already know SQL |
 | Migration tools | Drizzle Kit (CLI) | Manual | Prisma Migrate (CLI) | **Built-in**: `introspect()` + `diff()` + `applyDiff()` |
@@ -42,7 +42,7 @@ This is not an ORM. There are no lazy-loaded relations, no magical `save()` meth
 
 - **You want type safety** without an ORM's magic
 - **You need multi-dialect support**: one codebase for SQLite dev and PostgreSQL prod
-- **You need ClickHouse, Snowflake, or Databricks support**: Drizzle and Kysely don't cover these
+- **You need ClickHouse support**: Drizzle and Kysely don't cover it
 - **You want full control** over SQL output: every query is inspectable via `.toSQL()`
 - **You need high-throughput batch inserts**: debounce, timeout, and backpressure built in
 - **You want schema migrations** without a CLI: introspect live DBs, diff against schemas, generate ALTER TABLE
@@ -51,7 +51,7 @@ This is not an ORM. There are no lazy-loaded relations, no magical `save()` meth
 
 ## Features
 
-- **8 databases**: SQLite, PostgreSQL, MySQL/MariaDB, SQL Server, ClickHouse, Oracle, Snowflake, Databricks/Spark SQL
+- **5 databases**: SQLite, PostgreSQL, MySQL/MariaDB, SQL Server, ClickHouse
 - **Schema-driven table definitions**: define columns once for DDL + typed queries
 - **Fluent query builders**: SELECT, INSERT, UPDATE, DELETE with full type inference
 - **Safe raw SQL**: `db.sql\`...\`` tagged templates with dialect-aware placeholders
@@ -102,9 +102,6 @@ bun add pg                   # PostgreSQL
 bun add mysql2               # MySQL / MariaDB
 bun add mssql                # SQL Server
 bun add better-sqlite3       # SQLite (Node.js)
-bun add oracledb             # Oracle
-bun add snowflake-sdk        # Snowflake
-bun add @databricks/sql      # Databricks
 ```
 
 SQLite on Bun uses `bun:sqlite` (built-in, no driver needed).
@@ -124,9 +121,6 @@ which uses Bun's built-in SQL client.
 | MySQL / MariaDB | `@coderbuzz/sql/mysql` | `mysql` | `mysql2` |
 | SQL Server | `@coderbuzz/sql/mssql` | `mssql` | `mssql` |
 | ClickHouse | `@coderbuzz/sql/clickhouse` | `ch` | Native `fetch` HTTP |
-| Oracle | `@coderbuzz/sql/oracle` | `oracle` | `oracledb` |
-| Snowflake | `@coderbuzz/sql/snowflake` | `snowflake` | `snowflake-sdk` |
-| Databricks / Spark SQL | `@coderbuzz/sql/databricks` | `databricks` | `@databricks/sql` |
 
 ---
 
@@ -981,48 +975,20 @@ const db = mssql.connect({ server: "localhost", port: 1433, database: "app", use
 const db = ch.connect({ url: "http://localhost:8123", database: "default", username: "default", password: "" });
 ```
 
-### Oracle
-
-```ts
-const db = oracle.connect({
-  user: "app", password: "secret",
-  connectString: "localhost/XEPDB1", poolMax: 10,
-});
-```
-
-### Snowflake
-
-```ts
-const db = snowflake.connect({
-  account: "my-account", username: "APP_USER", password: "secret",
-  database: "APP_DB", schema: "PUBLIC", warehouse: "COMPUTE_WH", role: "APP_ROLE",
-});
-```
-
-### Databricks
-
-```ts
-const db = databricks.connect({
-  host: "adb-xxxx.azuredatabricks.net",
-  path: "/sql/1.0/warehouses/xxxx",
-  token: "dapi...",
-});
-```
-
 ---
 
 ## Dialect Behavior Notes
 
 | Feature | Notes |
 |---|---|
-| Placeholders | `?` (SQLite/MySQL/ClickHouse), `$N` (PostgreSQL), `@pN` (MSSQL), `:N` (Oracle) |
+| Placeholders | `?` (SQLite/MySQL/ClickHouse), `$N` (PostgreSQL), `@pN` (MSSQL) |
 | `RETURNING` | PostgreSQL and SQLite only |
 | Full outer join | Not supported by SQLite, MySQL, or ClickHouse |
 | ClickHouse params | Escaped and inlined into SQL (no native binding) |
 | ClickHouse indexes | Part of ENGINE definition |
 | MSSQL limit without order | Injects `ORDER BY (SELECT NULL)` automatically |
 | SQLite WAL mode | Enabled automatically for file-based DBs |
-| Identifier quoting | `"quotes"` (PG, SQLite, Oracle, Snowflake), backticks (MySQL, ClickHouse, Databricks), `[brackets]` (MSSQL) |
+| Identifier quoting | `"quotes"` (PG, SQLite), backticks (MySQL, ClickHouse), `[brackets]` (MSSQL) |
 
 ---
 

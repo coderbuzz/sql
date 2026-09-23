@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@60ca8c4 -->
+<!-- docs: sync from coderbuzz/codex@643d093 -->
 
 # @coderbuzz/sql: AI Expert Knowledge Reference
 
@@ -13,7 +13,7 @@ package. Treat every rule here as authoritative.
 ## 1. Mental Model
 
 ```
-Dialect Namespace (sqlite / pg / mysql / mssql / ch / oracle / snowflake / databricks)
+Dialect Namespace (sqlite / pg / mysql / mssql / ch)
   ├── connect(config)       → Engine instance (extends Sql<T>)
   ├── table(name, schema)   → SqlTable<S>
   ├── column factories      (integer, text, serial, uuid, ...)
@@ -50,9 +50,6 @@ import { pg as pgBun } from "@coderbuzz/sql/postgres-bun"; // driver: Bun built-
 import { mysql } from "@coderbuzz/sql/mysql";
 import { mssql } from "@coderbuzz/sql/mssql";
 import { ch } from "@coderbuzz/sql/clickhouse";
-import { oracle } from "@coderbuzz/sql/oracle";
-import { snowflake } from "@coderbuzz/sql/snowflake";
-import { databricks } from "@coderbuzz/sql/databricks";
 ```
 
 ### 2.2 Root package: shared helpers and types
@@ -145,9 +142,6 @@ import * as sqliteTypes from "@coderbuzz/sql/sqlite-types";
 import * as clickhouseTypes from "@coderbuzz/sql/clickhouse-types";
 import * as mysqlTypes from "@coderbuzz/sql/mysql-types";
 import * as mssqlTypes from "@coderbuzz/sql/mssql-types";
-import * as oracleTypes from "@coderbuzz/sql/oracle-types";
-import * as snowflakeTypes from "@coderbuzz/sql/snowflake-types";
-import * as databricksTypes from "@coderbuzz/sql/databricks-types";
 ```
 
 ---
@@ -219,32 +213,6 @@ const db = ch.connect({
   database: "default",
   username: "default",
   password: "",
-});
-
-// Oracle
-const db = oracle.connect({
-  user: "app",
-  password: "secret",
-  connectString: "localhost/XEPDB1",
-  poolMax: 10,
-});
-
-// Snowflake
-const db = snowflake.connect({
-  account: "my-account",
-  username: "APP_USER",
-  password: "secret",
-  database: "APP_DB",
-  schema: "PUBLIC",
-  warehouse: "COMPUTE_WH",
-  role: "APP_ROLE",
-});
-
-// Databricks
-const db = databricks.connect({
-  host: "adb-xxxx.azuredatabricks.net",
-  path: "/sql/1.0/warehouses/xxxx",
-  token: "dapi...",
 });
 ```
 
@@ -663,9 +631,6 @@ await events.insert(db)
 | SQLite     | ✓                | ✓                |
 | MySQL      | ✗ (throws)       | ✗ (throws)       |
 | MSSQL      | ✗ (throws)       | ✗ (throws)       |
-| Oracle     | ✗ (throws)       | ✗ (throws)       |
-| Snowflake  | ✗ (throws)       | ✗ (throws)       |
-| Databricks | ✗ (throws)       | ✗ (throws)       |
 | ClickHouse | ✗ (throws)       | ✗ (throws)       |
 
 ---
@@ -779,7 +744,6 @@ Placeholder styles per dialect:
 | PostgreSQL | `$N`  | `... WHERE id = $1`  |
 | MySQL      | `?`   | `... WHERE id = ?`   |
 | MSSQL      | `@pN` | `... WHERE id = @p1` |
-| Oracle     | `:N`  | `... WHERE id = :1`  |
 | Others     | `?`   | `... WHERE id = ?`   |
 
 ---
@@ -836,7 +800,7 @@ tx.select("last_no").from("nomor_faktur").where({ seri: "A" }).forUpdate()
 // .forShare(), .forUpdate({ noWait: true }), .forUpdate({ skipLocked: true })
 ```
 
-PostgreSQL / MySQL / Oracle only. SQLite, MSSQL and ClickHouse throw.
+PostgreSQL / MySQL only. SQLite, MSSQL and ClickHouse throw.
 
 ### Errors
 
@@ -964,49 +928,20 @@ ch.boolean()  ch.date()  ch.date32()  ch.datetime()  ch.datetime64(precision)
 ch.uuid()  ch.ipv4()  ch.ipv6()  ch.lowCardinality(type)
 ```
 
-### Oracle
-
-ANSI types plus:
-
-```ts
-oracle.number(p?, s?)   oracle.varchar2(n)   oracle.clob()
-oracle.blob()           oracle.date()        oracle.timestamp_tz(precision)
-// Note: oracle.date() is exported as `oracleDate` from the namespace
-//       to avoid collision with ANSI `date`
-```
-
-### Snowflake
-
-ANSI types plus:
-
-```ts
-snowflake.variant<T>()        snowflake.timestamp_ntz(precision)
-snowflake.timestamp_ltz(precision)   snowflake.array_type<T>()
-snowflake.object_type<T>()
-```
-
-### Databricks
-
-```ts
-databricks.string()   databricks.long()   databricks.double()
-databricks.struct<T>(fields)  databricks.map_type<K, V>()  databricks.array_type<T>()
-```
-
 ---
 
 ## 19. Dialect-Specific Behaviors
 
 | Behavior                    | Details                                                                                                     |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| **Identifier quoting**      | `"id"` (PG, SQLite, Oracle, Snowflake) · `` `id` `` (MySQL, CH, Databricks) · `[id]` (MSSQL)                |
-| **Placeholders**            | `?` (SQLite/MySQL/CH/Snowflake/Databricks) · `$N` (PG) · `@pN` (MSSQL) · `:N` (Oracle)                      |
+| **Identifier quoting**      | `"id"` (PG, SQLite) · `` `id` `` (MySQL, CH) · `[id]` (MSSQL)                                          |
+| **Placeholders**            | `?` (SQLite/MySQL/CH) · `$N` (PG) · `@pN` (MSSQL)                                                      |
 | **RETURNING**               | PostgreSQL + SQLite only. Others throw `"RETURNING is not supported by this dialect"`                       |
 | **FULL OUTER JOIN**         | PostgreSQL + ANSI only. SQLite/MySQL/ClickHouse throw at compile time                                       |
 | **ClickHouse params**       | Values inlined into SQL (HTTP API has no native binding). Safe via `escapeClickHouseValue()`                |
 | **ClickHouse CREATE INDEX** | Not emitted. Indexes are defined via the ENGINE / ORDER BY clause                                           |
 | **ClickHouse UNIQUE**       | Not supported. Throws if `.unique()` is used in a ClickHouse table                                          |
 | **MSSQL LIMIT**             | Renders as `OFFSET n ROWS FETCH NEXT m ROWS ONLY`. Injects `ORDER BY (SELECT NULL)` when no ORDER BY exists |
-| **Oracle LIMIT**            | Same `OFFSET/FETCH` syntax as MSSQL                                                                         |
 | **MySQL SERIAL**            | `SERIAL` primary key becomes `INT AUTO_INCREMENT` in DDL                                                    |
 | **SQLite WAL**              | `PRAGMA journal_mode = WAL` applied automatically for file-based DB                                         |
 | **SQLite streaming**        | Uses `bun:sqlite` synchronous `stmt.iterate()`                                                              |
@@ -1083,7 +1018,7 @@ result.statistics?.read_rows; // optional stats
 
 | Error message                                                                        | When it occurs                                                                                    |
 | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `"RETURNING is not supported by this dialect"`                                       | `.returning()` called on MySQL/MSSQL/Oracle/Snowflake/Databricks/ClickHouse and `.toSQL()` called |
+| `"RETURNING is not supported by this dialect"`                                       | `.returning()` called on MySQL/MSSQL/ClickHouse and `.toSQL()` called                            |
 | `"SQLite does not support FULL OUTER JOIN"`                                          | `.full_join()` used with SQLite compiler                                                          |
 | `"MySQL does not support FULL OUTER JOIN"`                                           | `.full_join()` used with MySQL compiler                                                           |
 | `"ClickHouse does not support FULL OUTER JOIN"`                                      | `.full_join()` used with ClickHouse compiler                                                      |
@@ -1107,11 +1042,10 @@ const rows = await db.execute(`SELECT * FROM users WHERE name = '${name}'`);
 const rows = await db.sql`SELECT * FROM users WHERE name = ${name}`.execute();
 ```
 
-**DO NOT** call `.stream()` or `.prepare()` on MySQL, MSSQL, Oracle, Snowflake,
-Databricks, or ClickHouse engines: they throw.
+**DO NOT** call `.stream()` or `.prepare()` on MySQL, MSSQL, or ClickHouse
+engines: they throw.
 
-**DO NOT** use `.returning()` on MySQL, MSSQL, Oracle, Snowflake, Databricks, or
-ClickHouse: throws `"RETURNING is not supported by this dialect"`.
+**DO NOT** use `.returning()` on MySQL, MSSQL, or ClickHouse: throws `"RETURNING is not supported by this dialect"`.
 
 **DO NOT** use `.full_join()` with SQLite, MySQL, or ClickHouse: throws at
 compile time.
@@ -1533,7 +1467,7 @@ Package: @coderbuzz/sql
 Version: 0.1.3
 License: MIT
 Type:    ESM only (type: "module")
-Peer deps (all optional): pg, mysql2, mssql, better-sqlite3, @db/sqlite, oracledb, snowflake-sdk, @databricks/sql
+Peer deps (all optional): pg, mysql2, mssql, better-sqlite3, @db/sqlite
 Runtime dep: @coderbuzz/veta (internal, schema coercion)
 ```
 
@@ -1549,15 +1483,9 @@ Runtime dep: @coderbuzz/veta (internal, schema coercion)
 | `@coderbuzz/sql/mysql`            | `mysql` namespace + `MySQLEngine`   |
 | `@coderbuzz/sql/mssql`            | `mssql` namespace + `MSSQLEngine`   |
 | `@coderbuzz/sql/clickhouse`       | `ch` namespace + `ClickHouseEngine` |
-| `@coderbuzz/sql/oracle`           | `oracle` namespace + `OracleEngine` |
-| `@coderbuzz/sql/snowflake`        | `snowflake` + `SnowflakeEngine`     |
-| `@coderbuzz/sql/databricks`       | `databricks` + `DatabricksEngine`   |
 | `@coderbuzz/sql/sqlite-types`     | SQLite column factories only        |
 | `@coderbuzz/sql/postgres-types`   | PostgreSQL column factories only    |
 | `@coderbuzz/sql/mysql-types`      | MySQL column factories only         |
 | `@coderbuzz/sql/mssql-types`      | MSSQL column factories only         |
 | `@coderbuzz/sql/clickhouse-types` | ClickHouse column factories only    |
-| `@coderbuzz/sql/oracle-types`     | Oracle column factories only        |
-| `@coderbuzz/sql/snowflake-types`  | Snowflake column factories only     |
-| `@coderbuzz/sql/databricks-types` | Databricks column factories only    |
 | `@coderbuzz/sql/ansi`             | ANSI column factories only          |
