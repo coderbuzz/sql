@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@30320de -->
+<!-- docs: sync from coderbuzz/codex@9a7a8a5 -->
 
 # @coderbuzz/sql: AI Expert Knowledge Reference
 
@@ -1370,7 +1370,8 @@ On a runtime without `Bun.SQL` the constructor throws with a message pointing at
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `connectionString` | none | `postgres://user:pass@host:port/db`; an explicit `user`/`password` overrides the credentials inside it (this is what lets `unsafeCrossTenant` swap in the BYPASSRLS role) |
-| `host` / `port` / `database` / `user` / `password` | `localhost` / `5432` / none / none / none | connection parts |
+| `host` / `port` | `localhost` / `5432` | pinned like the `pg` engine, so `DATABASE_URL`/`PGHOST`/`PGPORT` cannot redirect the engine |
+| `database` / `user` / `password` | `PGDATABASE` / `PGUSER` / `PGPASSWORD`, then `USER` | same libpq fallback as the `pg` engine; see below |
 | `max` | `10` | pool size |
 | `idleTimeout` | driver default | seconds a pooled connection may idle |
 | `connectionTimeout` | driver default | seconds to wait for a connection |
@@ -1382,6 +1383,41 @@ On a runtime without `Bun.SQL` the constructor throws with a message pointing at
 | `tenantSetting` | `'app.tenant_id'` | run-time parameter RLS policies read |
 | `crossTenant` | none | `{ user, password, max? }` for a `BYPASSRLS` role |
 | `onCrossTenantAccess` | none | called with the reason on every `unsafeCrossTenant()` |
+
+**Environment fallback (measured on Bun 1.4.2 and `pg` 8.21.0).** Left to
+itself, `Bun.SQL` with `adapter: 'postgres'` fills every connection field left
+out from the environment, and an empty string (or `port: 0`) counts as left out:
+
+| Source | Variables | Read by raw `Bun.SQL` | Read by this engine | Read by the `pg` engine |
+| --- | --- | --- | --- | --- |
+| URL | `DATABASE_URL` > `POSTGRES_URL` > `PGURL` > `PG_URL`; `TLS_DATABASE_URL`, `TLS_POSTGRES_DATABASE_URL` also turn TLS on | yes, any scheme (`mysql://` included) | **no** | no |
+| host / port | `PGHOST`, `PGPORT` | yes | only `PGPORT`, and only when `connectionString` has no port | same as this engine |
+| credentials | `PGUSER`, `PGPASSWORD`, `PGDATABASE`, then `USER` for user and database | yes | yes | yes |
+| TLS | `PGSSLMODE` | yes | yes | yes |
+| ignored | `POSTGRES_HOST`/`_USER`/`_PASSWORD`/`_DATABASE`/`_DB`, `POSTGRES_DATABASE_URL` | no | no | no |
+
+Up to 0.8.0 the engine passed raw `Bun.SQL` the fields you gave and
+nothing else. With `DATABASE_URL=postgres://du:dupw@du-host:5111/dudb` in the
+environment, `pg.connect({ user, password, database })` connected to
+`du-host:5111` and sent *your* password there. `bunOptions()` now always
+passes a `url` (the `connectionString`, or `postgres://localhost:5432` with
+`hostname`/`port` set explicitly), which is what stops `Bun.SQL` from reading
+the URL variables at all. The libpq `PG*` fallback is kept because the `pg`
+engine has it too.
+
+Details:
+
+- Raw `Bun.SQL` lets `PGDATABASE` override the database named in the url.
+  `pg` does not, so the engine passes the url's database as `database`
+  explicitly. `config.database` still wins over both.
+- An empty `password: ''` does not mean "no password" under either engine:
+  `PGPASSWORD` fills it. Unset `PGPASSWORD` if the server uses trust auth.
+- `unsafeCrossTenant()` builds its client through the same `bunOptions()`,
+  so it connects to the same host/port/database as the main client with the
+  `crossTenant` credentials swapped in.
+
+Tests: `tests/sql.entrypoints.test.ts`, "pg namespace on Bun.SQL", set the
+variables in `process.env`, construct the engine and read `db.client.options`.
 
 ### Type mapping (verified against PostgreSQL 16 via Bun)
 

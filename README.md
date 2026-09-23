@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@30320de -->
+<!-- docs: sync from coderbuzz/codex@9a7a8a5 -->
 
 # @coderbuzz/sql
 
@@ -987,6 +987,11 @@ Bun-specific options: `bigint: true` (return `int8` as a JS `bigint`),
 `connectionTimeout`, `maxLifetime`, `tls`, `sslMode`. The underlying client is
 reachable as `db.client` for the parts Bun offers and this engine does not wrap,
 such as `LISTEN`/`NOTIFY`.
+
+Environment variables work as they do with `pg`: `PGUSER`, `PGPASSWORD`,
+`PGDATABASE` and `PGSSLMODE` fill fields you leave out, while host and port
+default to `localhost:5432`. `DATABASE_URL` and the other URL variables
+`Bun.SQL` would read on its own are ignored; pass them as `connectionString`.
 
 ### MySQL
 
