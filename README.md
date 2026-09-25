@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@b37bd48 -->
+<!-- docs: sync from coderbuzz/codex@a1ca665 -->
 
 # @coderbuzz/sql
 
@@ -263,7 +263,7 @@ for (const stmt of stmts) {
 ```
 
 > **Not importable yet.** `introspect`, `diff` and `applyDiff` live in
-> `src/migration/` but are not a tsup entry and not in the package's `exports`
+> `src/migration/` but are not a build entry and not in the package's `exports`
 > map, so the `@coderbuzz/sql/dist/migration/*` paths above do not resolve in
 > the published package. The example shows the API, not a working import.
 

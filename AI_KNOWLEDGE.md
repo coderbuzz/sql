@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@b37bd48 -->
+<!-- docs: sync from coderbuzz/codex@a1ca665 -->
 
 # @coderbuzz/sql: AI Expert Knowledge Reference
 
@@ -319,7 +319,7 @@ for (const stmt of stmts) {
 ```
 
 > **Not importable yet.** `introspect`, `diff` and `applyDiff` live in
-> `src/migration/` but are not a tsup entry and not in the `exports` map, so
+> `src/migration/` but are not a build entry and not in the `exports` map, so
 > the `@coderbuzz/sql/dist/migration/*` paths above do not resolve in the
 > published package. Do not generate code that imports them until a
 > `./migration` subpath exists.
