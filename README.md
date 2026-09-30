@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@a1ca665 -->
+<!-- docs: sync from coderbuzz/codex@1d1cd61 -->
 
 # @coderbuzz/sql
 
@@ -103,6 +103,8 @@ bun add mysql2               # MySQL / MariaDB
 bun add mssql                # SQL Server
 bun add better-sqlite3       # SQLite (Node.js)
 ```
+
+The drivers are optional peer dependencies: install only the one you use. (Up to 0.9.2 the published package marked them required, so npm 7+ installed all four.)
 
 SQLite on Bun uses `bun:sqlite` (built-in, no driver needed).
 SQLite on Deno uses `@db/sqlite`.

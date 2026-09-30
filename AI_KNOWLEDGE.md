@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@a1ca665 -->
+<!-- docs: sync from coderbuzz/codex@1d1cd61 -->
 
 # @coderbuzz/sql: AI Expert Knowledge Reference
 
@@ -1760,6 +1760,8 @@ Peer deps (all optional): pg, mysql2, mssql, better-sqlite3
 (@db/sqlite, used on Deno, is loaded at runtime but not declared as a peer dep)
 Runtime dep: @coderbuzz/veta (internal, schema coercion)
 ```
+
+The peers are optional through `peerDependenciesMeta`. Published versions up to 0.9.2 lacked that field (the build's `post-build.ts` dropped it), so npm 7+ installed all four drivers with `npm install @coderbuzz/sql` (99 packages, a native `better-sqlite3` build included). From the next patch release only `@coderbuzz/sql` and `@coderbuzz/veta` are installed; add the driver you use yourself (`npm install pg`), and it is still checked against the range (`pg@7` is refused). `bun run validate` fails if `dist/package.json` loses the field again.
 
 **Export map summary:**
 
