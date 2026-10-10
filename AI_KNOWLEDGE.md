@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@1d1cd61 -->
+<!-- docs: sync from coderbuzz/codex@8854676 -->
 
 # @coderbuzz/sql: AI Expert Knowledge Reference
 
@@ -1787,21 +1787,19 @@ The peers are optional through `peerDependenciesMeta`. Published versions up to 
 
 ## 30. Benchmarks
 
-Machine-readable source of truth: `https://raw.githubusercontent.com/coderbuzz/benchmarks/main/results/latest.json` (each entry has `winner`, `factorVsNext`, `higherIsBetter`). Quote numbers from there, not from memory.
+Machine-readable source of truth: `https://raw.githubusercontent.com/coderbuzz/benchmarks/main/results/latest.json` (suite ids `sql-simple`, `sql-join`, `sql-insert`, `sql-batch`, `sql-cte`, `sql-10-conditions`; each entry has `winner`, `factorVsNext`, `factorVsBest`, `higherIsBetter`). Quote numbers from there, not from memory, and not from the in-repo suites, which are for A/B runs between versions only.
 
-Full results at **[github.com/coderbuzz/benchmarks](https://github.com/coderbuzz/benchmarks)**.
-
-SQL query compilation throughput on Apple M-series, Bun runtime. Higher is better.
+Numbers from [github.com/coderbuzz/benchmarks](https://github.com/coderbuzz/benchmarks) (`results/latest.json`): cloud reference machine (Intel Xeon @ 2.10GHz, CPU model 207, 4 cores, Linux x64), Bun 1.4.2, run of 2026-10-10 (benchmarks `131fcc5`). @coderbuzz/sql 0.9.6 against Kysely 0.29.6 and Drizzle ORM 0.45.3; query **compilation** throughput only (building the SQL string, no database round trip), ops/s, best of 3 processes, higher is better.
 
 | Scenario | @coderbuzz/sql | Kysely | Factor vs Kysely | Drizzle ORM | Factor vs Drizzle |
 |---|---|---|---|---|---|
-| SELECT simple | **1,700,391 ops/s** | 561,869 | **3.0x** | 34,239 | **49.7x** |
-| SELECT JOIN (2 tables) | **2,208,322 ops/s** | 310,690 | **7.1x** | 16,801 | **131.4x** |
-| INSERT single row | **2,954,261 ops/s** | 393,159 | **7.5x** | 55,085 | **53.6x** |
-| INSERT batch 100 rows | **134,187 ops/s** | 17,634 | **7.6x** | 914 | **146.8x** |
-| CTE (WITH clause) | **831,703 ops/s** | 224,893 | **3.7x** | 12,222 | **68.0x** |
-| 10 nested WHERE conditions | **656,309 ops/s** | 117,064 | **5.6x** | 12,692 | **51.7x** |
+| SELECT simple | **1,032,086 ops/s** | 460,788 | **2.2x** | 46,083 | **22.4x** |
+| SELECT JOIN (2 tables) | **539,870 ops/s** | 264,268 | **2.0x** | 19,127 | **28.2x** |
+| INSERT single row | **1,729,852 ops/s** | 292,097 | **5.9x** | 52,251 | **33.1x** |
+| INSERT batch 100 rows | **70,248 ops/s** | 10,878 | **6.5x** | 842 | **83.4x** |
+| CTE (WITH clause) | **366,525 ops/s** | 160,544 | **2.3x** | 41,805 | **8.8x** |
+| 10 nested WHERE conditions | **446,201 ops/s** | 106,321 | **4.2x** | 19,358 | **23.0x** |
 
-`@coderbuzz/sql` is 3-8x faster than Kysely and 50-147x faster than Drizzle ORM across every query type. The gap widens with query complexity (batch, JOIN, conditions) due to `@coderbuzz/sql`'s zero-overhead string compilation strategy vs Kysely's AST-based approach and Drizzle's ORM abstraction layer.
+`@coderbuzz/sql` is 2.0-6.5x faster than Kysely and 8.8-83x faster than Drizzle ORM on every query type in the suite. The lead over Kysely is largest on inserts (5.9x single row, 6.5x batch) and many conditions (4.2x), smallest on JOIN and CTE (2.0-2.3x): `@coderbuzz/sql` compiles straight to a string, Kysely builds and walks an AST, Drizzle adds its ORM layer.
 
-These measure query **compilation** only (building the SQL string), not database round trips.
+These measure query **compilation** only (building the SQL string), not database round trips. Earlier tables in these docs (Apple M-series, older versions: 3-8x Kysely, 50-147x Drizzle) came from another machine and are superseded; do not quote them.
