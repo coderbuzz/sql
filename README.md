@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@5aee801 -->
+<!-- docs: sync from coderbuzz/codex@aa9c4da -->
 
 # @coderbuzz/sql
 
@@ -71,18 +71,18 @@ This is not an ORM. There are no lazy-loaded relations, no magical `save()` meth
 
 ## Benchmarks
 
-Numbers from [github.com/coderbuzz/benchmarks](https://github.com/coderbuzz/benchmarks) (`results/latest.json`): reference VM (Intel Xeon Platinum 8255C @ 2.50GHz, 4 cores, Linux x64), Bun 1.4.3, run of 2026-10-10 (benchmarks `6ed4ccf`). @coderbuzz/sql 0.9.6 against Kysely 0.29.6 and Drizzle ORM 0.45.3; query **compilation** throughput only (building the SQL string, no database round trip), ops/s, best of 3 processes, higher is better.
+Numbers from [github.com/coderbuzz/benchmarks](https://github.com/coderbuzz/benchmarks) (`results/latest.json`): cloud machine (Intel Xeon @ 2.80GHz, family 6 model 85 stepping 7, 4 cores, Linux x64), Bun 1.4.3, run of 2026-10-10 (benchmarks `f9601b4`). @coderbuzz/sql 0.9.6 against Kysely 0.29.6 and Drizzle ORM 0.45.3; query **compilation** throughput only (building the SQL string, no database round trip), ops/s, best of 3 processes, higher is better.
 
 | Scenario | @coderbuzz/sql | Kysely | Factor vs Kysely | Drizzle ORM | Factor vs Drizzle |
 |---|---|---|---|---|---|
-| SELECT simple | **804,807 ops/s** | 319,742 | **2.5x** | 29,699 | **27.1x** |
-| SELECT JOIN (2 tables) | **340,039 ops/s** | 186,871 | **1.8x** | 12,669 | **26.8x** |
-| INSERT single row | **1,119,447 ops/s** | 190,416 | **5.9x** | 33,574 | **33.3x** |
-| INSERT batch 100 rows | **46,379 ops/s** | 7,077 | **6.6x** | 497 | **93.3x** |
-| CTE (WITH clause) | **217,074 ops/s** | 102,676 | **2.1x** | 23,107 | **9.4x** |
-| 10 nested WHERE conditions | **307,419 ops/s** | 70,826 | **4.3x** | 10,873 | **28.3x** |
+| SELECT simple | **684,901 ops/s** | 331,204 | **2.1x** | 28,258 | **24.2x** |
+| SELECT JOIN (2 tables) | **344,165 ops/s** | 177,057 | **1.9x** | 11,837 | **29.1x** |
+| INSERT single row | **1,089,364 ops/s** | 205,742 | **5.3x** | 31,137 | **35.0x** |
+| INSERT batch 100 rows | **46,259 ops/s** | 7,242 | **6.4x** | 520 | **89.0x** |
+| CTE (WITH clause) | **210,058 ops/s** | 110,003 | **1.9x** | 24,185 | **8.7x** |
+| 10 nested WHERE conditions | **281,191 ops/s** | 72,561 | **3.9x** | 10,412 | **27.0x** |
 
-`@coderbuzz/sql` is 1.8-6.6x faster than Kysely and 9.4-93x faster than Drizzle ORM on every query type in the suite. The lead over Kysely is largest on inserts (5.9x single row, 6.6x batch) and many conditions (4.3x), smallest on JOIN and CTE (1.8-2.1x): `@coderbuzz/sql` compiles straight to a string, Kysely builds and walks an AST, Drizzle adds its ORM layer.
+`@coderbuzz/sql` is 1.9-6.4x faster than Kysely and 8.7-89x faster than Drizzle ORM on every query type in the suite. The lead over Kysely is largest on inserts (5.3x single row, 6.4x batch) and many conditions (3.9x), smallest on JOIN and CTE (1.9x): `@coderbuzz/sql` compiles straight to a string, Kysely builds and walks an AST, Drizzle adds its ORM layer.
 
 > Numbers move with the machine; compare them only within one run. The source of truth is `https://raw.githubusercontent.com/coderbuzz/benchmarks/main/results/latest.json`.
 
